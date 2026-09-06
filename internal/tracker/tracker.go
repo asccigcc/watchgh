@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"watchgit/internal/github"
-	"watchgit/internal/store"
-	"watchgit/internal/timeline"
+	"watchgh/internal/github"
+	"watchgh/internal/store"
+	"watchgh/internal/timeline"
 )
 
 // Diff compares prev against pr and returns any transition events plus the next

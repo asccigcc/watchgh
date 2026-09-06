@@ -1,4 +1,4 @@
-// The interactive timeline: bare `watchgit` on an alt-screen, arrow keys to
+// The interactive timeline: bare `wgh` on an alt-screen, arrow keys to
 // move, Enter to open (marking read), r to mark read, R to re-sync, q to quit.
 // It's a pure viewer over the store — the daemon (or an initial one-shot sync)
 // fills it — that re-reads on a ticker so daemon-fed events appear live.
@@ -15,9 +15,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"watchgit/internal/github"
-	"watchgit/internal/store"
-	"watchgit/internal/timeline"
+	"watchgh/internal/github"
+	"watchgh/internal/store"
+	"watchgh/internal/timeline"
 
 	"golang.org/x/sys/unix"
 )
@@ -431,7 +431,7 @@ func (t *tui) draw() {
 
 // titleBar is the app name, a full-width blue bar across the top.
 func (t *tui) titleBar() string {
-	return styChrome + padANSI(" ◆ watchgit — GitHub activity timeline", t.cols) + reset
+	return styChrome + padANSI(" ◆ watchgh — GitHub activity timeline", t.cols) + reset
 }
 
 // header draws the tab bar: the active tab reversed, each with its live count.

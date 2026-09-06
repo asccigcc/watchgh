@@ -1,4 +1,4 @@
-// Package config loads watchgit's user-tunable thresholds from a flat
+// Package config loads watchgh's user-tunable thresholds from a flat
 // `key = value` file (a TOML-compatible subset — no tables or arrays needed for
 // a handful of scalars). It lives next to the store, and every field falls back
 // to a sensible default, so the file is entirely optional.
@@ -39,13 +39,13 @@ func Defaults() Config {
 }
 
 // DefaultPath is the config file's location — the same per-user directory that
-// holds the store (`~/Library/Application Support/watchgit/` on macOS).
+// holds the store (`~/Library/Application Support/watchgh/` on macOS).
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "watchgit", "config.toml"), nil
+	return filepath.Join(dir, "watchgh", "config.toml"), nil
 }
 
 // Load reads the config from DefaultPath. A missing file yields Defaults with

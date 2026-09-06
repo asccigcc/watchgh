@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"watchgit/internal/timeline"
+	"watchgh/internal/timeline"
 )
 
 func testStore(t *testing.T) *Store {

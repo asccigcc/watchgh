@@ -159,7 +159,7 @@ fragment reviewed on PullRequest {
 
 // ReviewStates fetches the viewer's open PRs they've reviewed and reports, for
 // each, whether the latest review is still against the head commit. This is what
-// lets watchgit auto-resolve a review request once you've reviewed the current
+// lets watchgh auto-resolve a review request once you've reviewed the current
 // head and re-surface it when new commits land on top of your review.
 func (c *Client) ReviewStates(ctx context.Context) ([]ReviewState, error) {
 	var resp struct {

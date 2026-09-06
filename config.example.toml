@@ -1,8 +1,8 @@
-# watchgit configuration (all keys optional; shown values are the defaults).
+# watchgh configuration (all keys optional; shown values are the defaults).
 #
 # Copy to your config directory to override:
-#   macOS:  ~/Library/Application Support/watchgit/config.toml
-#   Linux:  ~/.config/watchgit/config.toml
+#   macOS:  ~/Library/Application Support/watchgh/config.toml
+#   Linux:  ~/.config/watchgh/config.toml
 #
 # Durations accept Go units (s, m, h) plus a day unit (d), e.g. "90s", "36h", "7d".
 # A missing file — or any missing key — keeps the default below.

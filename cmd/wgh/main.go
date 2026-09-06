@@ -1,4 +1,4 @@
-// Command watchgit shows GitHub activity you care about as an arrival-ordered
+// Command wgh shows GitHub activity you care about as an arrival-ordered
 // timeline: notifications (reviews/assigns/comments) plus tracked-PR CI and
 // merge-state transitions, with a live watch mode and desktop notifications.
 package main
@@ -15,14 +15,14 @@ import (
 	"syscall"
 	"time"
 
-	"watchgit/internal/config"
-	"watchgit/internal/daemon"
-	"watchgit/internal/github"
-	"watchgit/internal/ingest"
-	"watchgit/internal/notify"
-	"watchgit/internal/store"
-	"watchgit/internal/timeline"
-	"watchgit/internal/tracker"
+	"watchgh/internal/config"
+	"watchgh/internal/daemon"
+	"watchgh/internal/github"
+	"watchgh/internal/ingest"
+	"watchgh/internal/notify"
+	"watchgh/internal/store"
+	"watchgh/internal/timeline"
+	"watchgh/internal/tracker"
 )
 
 // cfg holds the user-tunable thresholds, loaded once at startup. Every field
@@ -38,7 +38,7 @@ func main() {
 	}
 
 	if c, err := config.Load(); err != nil {
-		fmt.Fprintln(os.Stderr, "watchgit: config:", err, "— using defaults")
+		fmt.Fprintln(os.Stderr, "wgh: config:", err, "— using defaults")
 	} else {
 		cfg = c
 	}
@@ -50,7 +50,7 @@ func main() {
 	var err error
 	switch cmd {
 	case "":
-		// Bare `watchgit` opens the interactive timeline when attached to a
+		// Bare `wgh` opens the interactive timeline when attached to a
 		// terminal; piped or redirected, it prints like `list` so scripts work.
 		if isTerminal(os.Stdout) && isTerminal(os.Stdin) {
 			err = runTUI(ctx)
@@ -70,27 +70,27 @@ func main() {
 	case "-h", "--help", "help":
 		usage()
 	default:
-		fmt.Fprintf(os.Stderr, "watchgit: unknown command %q\n\n", cmd)
+		fmt.Fprintf(os.Stderr, "wgh: unknown command %q\n\n", cmd)
 		usage()
 		os.Exit(2)
 	}
 	if err != nil && ctx.Err() == nil {
-		fmt.Fprintln(os.Stderr, "watchgit:", err)
+		fmt.Fprintln(os.Stderr, "wgh:", err)
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Println(`watchgit — a GitHub activity timeline
+	fmt.Println(`wgh — a GitHub activity timeline
 
 Usage:
-  watchgit               Interactive timeline (arrows/⏎/r/q); prints like list when piped
-  watchgit list          Print the stored timeline (polls once first)
-  watchgit watch         Stream new events live with desktop notifications
-  watchgit open <n>      Open item <n> in the browser and mark it read (here + GitHub)
-  watchgit read <n>      Mark item <n> read without opening
-  watchgit daemon <cmd>  Background poller: install | uninstall | status
-  watchgit help          Show this help
+  wgh               Interactive timeline (arrows/⏎/r/q); prints like list when piped
+  wgh list          Print the stored timeline (polls once first)
+  wgh watch         Stream new events live with desktop notifications
+  wgh open <n>      Open item <n> in the browser and mark it read (here + GitHub)
+  wgh read <n>      Mark item <n> read without opening
+  wgh daemon <cmd>  Background poller: install | uninstall | status
+  wgh help          Show this help
 
 The daemon runs the poll loop continuously via launchd, so desktop
 notifications fire even with no terminal open; list/watch just read the store.`)
@@ -169,7 +169,7 @@ func runDaemon(ctx context.Context, args []string) error {
 			return err
 		}
 		logPath, _ := daemon.LogPath()
-		fmt.Println("✓ watchgit daemon installed and started")
+		fmt.Println("✓ wgh daemon installed and started")
 		fmt.Println(dim("  polls in the background and posts desktop notifications, no terminal needed"))
 		fmt.Println(dim("  log: " + logPath))
 		return nil
@@ -177,7 +177,7 @@ func runDaemon(ctx context.Context, args []string) error {
 		if err := daemon.Uninstall(); err != nil {
 			return err
 		}
-		fmt.Println("✓ watchgit daemon stopped and removed")
+		fmt.Println("✓ wgh daemon stopped and removed")
 		return nil
 	case "status":
 		s, err := daemon.Status()
@@ -402,7 +402,7 @@ func notifyActionable(events []timeline.Event) {
 
 func runMark(ctx context.Context, args []string, open bool) error {
 	if len(args) != 1 {
-		return fmt.Errorf("expected an item number, e.g. `watchgit open 42`")
+		return fmt.Errorf("expected an item number, e.g. `wgh open 42`")
 	}
 	seq, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
@@ -419,7 +419,7 @@ func runMark(ctx context.Context, args []string, open bool) error {
 		return fmt.Errorf("no item #%d in the timeline", seq)
 	}
 	if err := applyMark(ctx, st, e, open); err != nil {
-		fmt.Fprintln(os.Stderr, "watchgit:", err)
+		fmt.Fprintln(os.Stderr, "wgh:", err)
 	}
 	fmt.Printf("✓ #%d marked read\n", seq)
 	return nil

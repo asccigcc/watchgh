@@ -1,7 +1,7 @@
-// Command watchgit-menu is a macOS menu-bar viewer for the watchgit timeline.
+// Command wgh-menu is a macOS menu-bar viewer for the watchgh timeline.
 // It reads the same SQLite store the daemon fills, shows recent events in the
 // status-bar dropdown with an unread badge, and opens an item (marking it read
-// here and on GitHub) by delegating to the `watchgit` CLI. It never polls
+// here and on GitHub) by delegating to the `wgh` CLI. It never polls
 // GitHub itself — the launchd daemon is the poller; this is a pure viewer.
 package main
 
@@ -14,11 +14,11 @@ import (
 	"strconv"
 	"time"
 
-	"watchgit/internal/config"
-	"watchgit/internal/daemon"
-	"watchgit/internal/ingest"
-	"watchgit/internal/store"
-	"watchgit/internal/timeline"
+	"watchgh/internal/config"
+	"watchgh/internal/daemon"
+	"watchgh/internal/ingest"
+	"watchgh/internal/store"
+	"watchgh/internal/timeline"
 
 	"github.com/caseymrm/menuet/v2"
 )
@@ -39,19 +39,19 @@ var cfg = config.Defaults()
 func main() {
 	path, err := store.DefaultPath()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "watchgit-menu:", err)
+		fmt.Fprintln(os.Stderr, "wgh-menu:", err)
 		os.Exit(1)
 	}
 	st, err = store.Open(path)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "watchgit-menu:", err)
+		fmt.Fprintln(os.Stderr, "wgh-menu:", err)
 		os.Exit(1)
 	}
 	defer st.Close()
 	_ = ingest.Backfill(st) // one-off cleanup of pre-fix rows
 
 	if c, err := config.Load(); err != nil {
-		fmt.Fprintln(os.Stderr, "watchgit-menu: config:", err, "— using defaults")
+		fmt.Fprintln(os.Stderr, "wgh-menu: config:", err, "— using defaults")
 	} else {
 		cfg = c
 	}
@@ -59,8 +59,8 @@ func main() {
 	go refreshBadge()
 
 	app := menuet.App()
-	app.Name = "watchgit"
-	app.Label = "com.watchgit.menu" // also lets menuet manage "Start at Login"
+	app.Name = "watchgh"
+	app.Label = "com.watchgh.menu" // also lets menuet manage "Start at Login"
 	app.Children = menuItems
 	app.RunApplication() // menuet appends "Start at Login" and "Quit" itself
 }
@@ -96,7 +96,7 @@ func menuItems() []menuet.MenuItem {
 		return append([]menuet.MenuItem{menuet.Regular{Text: "⚠ " + err.Error()}}, daemonItems()...)
 	}
 	// The menu is an inbox, not a history: show only what you haven't visited
-	// (new + still-unread-but-aging). Read items live in `watchgit list`. This
+	// (new + still-unread-but-aging). Read items live in `wgh list`. This
 	// also keeps the dropdown in step with the badge, which counts unread only.
 	var events []timeline.Event
 	for _, e := range all {
@@ -133,7 +133,7 @@ func menuItems() []menuet.MenuItem {
 	more := len(events) - len(shown)
 	if more > 0 {
 		items = append(items, menuet.Regular{
-			Text:  fmt.Sprintf("…%d more — run `watchgit list`", more),
+			Text:  fmt.Sprintf("…%d more — run `wgh list`", more),
 			Color: menuet.LabelTertiary,
 		})
 	}
@@ -225,37 +225,37 @@ func weight(unread bool) menuet.FontWeight {
 
 // startDaemon (re)installs the LaunchAgent via the CLI rather than calling
 // daemon.Install here: install points the plist at os.Executable, which must be
-// the watchgit poller, not this viewer binary.
+// the wgh poller, not this viewer binary.
 func startDaemon() {
-	_ = exec.Command(watchgitBin(), "daemon", "install").Run()
+	_ = exec.Command(wghBin(), "daemon", "install").Run()
 	setState()
 	menuet.App().MenuChanged()
 }
 
 func openItem(seq int64) {
-	_ = exec.Command(watchgitBin(), "open", strconv.FormatInt(seq, 10)).Run()
+	_ = exec.Command(wghBin(), "open", strconv.FormatInt(seq, 10)).Run()
 	setState()
 	menuet.App().MenuChanged()
 }
 
 func openAll(seqs []int64) {
 	for _, seq := range seqs {
-		_ = exec.Command(watchgitBin(), "open", strconv.FormatInt(seq, 10)).Run()
+		_ = exec.Command(wghBin(), "open", strconv.FormatInt(seq, 10)).Run()
 	}
 	setState()
 	menuet.App().MenuChanged()
 }
 
-// watchgitBin locates the CLI: prefer the copy next to this binary, then PATH.
-func watchgitBin() string {
+// wghBin locates the CLI: prefer the copy next to this binary, then PATH.
+func wghBin() string {
 	if self, err := os.Executable(); err == nil {
-		cand := filepath.Join(filepath.Dir(self), "watchgit")
+		cand := filepath.Join(filepath.Dir(self), "wgh")
 		if _, err := os.Stat(cand); err == nil {
 			return cand
 		}
 	}
-	if p, err := exec.LookPath("watchgit"); err == nil {
+	if p, err := exec.LookPath("wgh"); err == nil {
 		return p
 	}
-	return "watchgit"
+	return "wgh"
 }

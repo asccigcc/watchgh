@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"watchgit/internal/github"
-	"watchgit/internal/timeline"
+	"watchgh/internal/github"
+	"watchgh/internal/timeline"
 )
 
 func TestClassify(t *testing.T) {

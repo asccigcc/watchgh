@@ -3,9 +3,9 @@
 package ingest
 
 import (
-	"watchgit/internal/github"
-	"watchgit/internal/store"
-	"watchgit/internal/timeline"
+	"watchgh/internal/github"
+	"watchgh/internal/store"
+	"watchgh/internal/timeline"
 )
 
 // Backfill runs the one-off cleanup that rewrites events still holding a raw

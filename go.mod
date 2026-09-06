@@ -1,4 +1,4 @@
-module watchgit
+module watchgh
 
 go 1.27
 

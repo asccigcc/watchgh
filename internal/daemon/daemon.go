@@ -1,4 +1,4 @@
-// Package daemon installs and controls the watchgit background poller as a
+// Package daemon installs and controls the watchgh background poller as a
 // macOS per-user LaunchAgent, so notifications fire without a terminal open.
 // A LaunchAgent (not a system LaunchDaemon) runs inside the user's GUI login
 // session — that's what lets it post desktop notifications.
@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-const label = "com.watchgit"
+const label = "com.watchgh"
 
 // PlistPath is where the LaunchAgent definition lives.
 func PlistPath() (string, error) {
@@ -30,7 +30,7 @@ func LogPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "Logs", "watchgit.log"), nil
+	return filepath.Join(home, "Library", "Logs", "watchgh.log"), nil
 }
 
 // Install writes the LaunchAgent plist pointing at this binary and (re)loads it.
@@ -117,7 +117,7 @@ func Status() (string, error) {
 		return "", err
 	}
 	if !s.Installed {
-		return "not installed — run `watchgit daemon install`", nil
+		return "not installed — run `wgh daemon install`", nil
 	}
 	plist, _ := PlistPath()
 	logPath, _ := LogPath()

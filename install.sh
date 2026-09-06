@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 #
-# watchgit installer — builds and installs both pieces from source:
-#   1. the watchgit CLI/daemon  -> $BINDIR (default ~/go/bin)
-#   2. the watchgit-menu.app    -> $APPDIR (default ~/Applications), then launches it
+# watchgh installer — builds and installs both pieces from source:
+#   1. the wgh CLI/daemon    -> $BINDIR (default ~/go/bin)
+#   2. the wgh-menu.app      -> $APPDIR (default ~/Applications), then launches it
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgit/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
 #
 # The menu bar app uses cgo, so a Go toolchain and the Xcode command line tools
 # are required. Override install locations or the source ref with env vars:
-#   BINDIR=/usr/local/bin APPDIR=/Applications WATCHGIT_REF=v1.2.3 bash install.sh
-#   WATCHGIT_NO_MENU=1   bash install.sh   # CLI/daemon only, skip the menu app
+#   BINDIR=/usr/local/bin APPDIR=/Applications WGH_REF=v1.2.3 bash install.sh
+#   WGH_NO_MENU=1   bash install.sh   # CLI/daemon only, skip the menu app
 set -euo pipefail
 
-REPO="${WATCHGIT_REPO:-https://github.com/asccigcc/watchgit.git}"
-REF="${WATCHGIT_REF:-main}"
+REPO="${WGH_REPO:-https://github.com/asccigcc/watchgh.git}"
+REF="${WGH_REF:-main}"
 BINDIR="${BINDIR:-$HOME/go/bin}"
 APPDIR="${APPDIR:-$HOME/Applications}"
 MIN_GO="1.27"
@@ -26,32 +26,32 @@ die()  { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # --- preflight ------------------------------------------------------------
-[ "$(uname -s)" = "Darwin" ] || die "watchgit is macOS-only (needs launchd + the menu bar)."
+[ "$(uname -s)" = "Darwin" ] || die "watchgh is macOS-only (needs launchd + the menu bar)."
 have git || die "git is required. Install the Xcode command line tools: xcode-select --install"
 have go  || die "Go is required. Install it from https://go.dev/dl or: brew install go"
 
 # Go must be new enough to build the module (go.mod pins $MIN_GO).
 gover="$(go env GOVERSION 2>/dev/null | sed 's/^go//')"
 if [ -n "$gover" ] && [ "$(printf '%s\n%s\n' "$MIN_GO" "$gover" | sort -V | head -1)" != "$MIN_GO" ]; then
-  die "Go $gover is too old; watchgit needs $MIN_GO or newer."
+  die "Go $gover is too old; watchgh needs $MIN_GO or newer."
 fi
 
 # The menu app needs a C compiler (cgo). CLI/daemon is cgo-free, so this is only
 # fatal when we're building the menu.
-if [ -z "${WATCHGIT_NO_MENU:-}" ] && ! have cc && ! have clang; then
-  die "The menu app needs a C compiler. Run: xcode-select --install (or set WATCHGIT_NO_MENU=1)"
+if [ -z "${WGH_NO_MENU:-}" ] && ! have cc && ! have clang; then
+  die "The menu app needs a C compiler. Run: xcode-select --install (or set WGH_NO_MENU=1)"
 fi
 
 # --- fetch source ---------------------------------------------------------
 # Build in place when run from a checkout; otherwise clone shallowly to a temp
 # dir we clean up on exit.
 SRC=""
-if [ -f "./go.mod" ] && head -1 ./go.mod | grep -q '^module watchgit'; then
+if [ -f "./go.mod" ] && head -1 ./go.mod | grep -q '^module watchgh'; then
   SRC="$(pwd)"
 else
-  SRC="$(mktemp -d "${TMPDIR:-/tmp}/watchgit.XXXXXX")"
+  SRC="$(mktemp -d "${TMPDIR:-/tmp}/watchgh.XXXXXX")"
   trap 'rm -rf "$SRC"' EXIT
-  bold "Fetching watchgit ($REF)…"
+  bold "Fetching watchgh ($REF)…"
   git clone --quiet --depth 1 --branch "$REF" "$REPO" "$SRC" \
     || die "clone failed — is $REF a valid branch/tag on $REPO?"
 fi
@@ -59,19 +59,19 @@ fi
 # --- build & install ------------------------------------------------------
 bold "Installing the CLI/daemon → $BINDIR"
 make -C "$SRC" install BINDIR="$BINDIR" >/dev/null
-info "installed $BINDIR/watchgit"
+info "installed $BINDIR/wgh"
 
-if [ -z "${WATCHGIT_NO_MENU:-}" ]; then
+if [ -z "${WGH_NO_MENU:-}" ]; then
   bold "Building the menu bar app → $APPDIR"
   make -C "$SRC" menu-app BINDIR="$BINDIR" APPDIR="$APPDIR" >/dev/null
-  open "$APPDIR/watchgit-menu.app"
-  info "launched watchgit-menu — look for ◆ in the menu bar"
+  open "$APPDIR/wgh-menu.app"
+  info "launched wgh-menu — look for ◆ in the menu bar"
   info "use its 'Start at Login' item to keep it running across reboots"
 fi
 
 # --- guidance -------------------------------------------------------------
 echo
-bold "✓ watchgit installed"
+bold "✓ watchgh installed"
 
 case ":$PATH:" in
   *":$BINDIR:"*) ;;
@@ -85,5 +85,5 @@ else
 fi
 
 echo
-info "watchgit                  # open the interactive timeline"
-info "watchgit daemon install   # run the background poller (desktop notifications)"
+info "wgh                  # open the interactive timeline"
+info "wgh daemon install   # run the background poller (desktop notifications)"

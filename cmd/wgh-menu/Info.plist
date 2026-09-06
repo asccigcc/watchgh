@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>watchgit</string>
+	<string>watchgh</string>
 	<key>CFBundleDisplayName</key>
-	<string>watchgit</string>
+	<string>watchgh</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.watchgit.menu</string>
+	<string>com.watchgh.menu</string>
 	<key>CFBundleExecutable</key>
-	<string>watchgit-menu</string>
+	<string>wgh-menu</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -22,6 +22,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>watchgit</string>
+	<string>watchgh</string>
 </dict>
 </plist>

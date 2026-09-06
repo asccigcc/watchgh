@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"watchgit/internal/timeline"
+	"watchgh/internal/timeline"
 
 	_ "modernc.org/sqlite"
 )
@@ -88,17 +88,18 @@ type OpenPR struct {
 	UpdatedAt  time.Time
 }
 
-// DefaultPath is the per-user database location (~/.config/watchgit/watchgit.db).
+// DefaultPath is the per-user database location (~/.config/watchgh/watchgh.db).
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "watchgit", "watchgit.db"), nil
+	return filepath.Join(dir, "watchgh", "watchgh.db"), nil
 }
 
 // Open opens (creating parent dirs and schema as needed) the store at path.
 func Open(path string) (*Store, error) {
+	migrateLegacyDir(filepath.Dir(path))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
@@ -119,6 +120,30 @@ func Open(path string) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// migrateLegacyDir carries a pre-rename data directory (watchgit) over to the
+// current one (watchgh) the first time we run under the new name, so the store —
+// read state, seq numbers, roster — and config.toml survive the rename instead
+// of starting fresh. Best-effort: any failure just means a clean start. Safe to
+// drop once no watchgit installs remain in the wild.
+func migrateLegacyDir(newDir string) {
+	if _, err := os.Stat(newDir); err == nil {
+		return // already on the new path
+	}
+	legacy := filepath.Join(filepath.Dir(newDir), "watchgit")
+	if _, err := os.Stat(legacy); err != nil {
+		return // nothing to migrate
+	}
+	if err := os.Rename(legacy, newDir); err != nil {
+		return
+	}
+	// config.toml keeps its name; only the DB files carry the old base name.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		_ = os.Rename(
+			filepath.Join(newDir, "watchgit.db"+suffix),
+			filepath.Join(newDir, "watchgh.db"+suffix))
+	}
+}
 
 // Upsert inserts a new event or refreshes the mutable fields of an existing one
 // (matched by ID), preserving seq, first_seen, and any local read_at.

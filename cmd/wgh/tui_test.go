@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"watchgit/internal/store"
-	"watchgit/internal/timeline"
+	"watchgh/internal/store"
+	"watchgh/internal/timeline"
 )
 
 func TestParseKeys(t *testing.T) {

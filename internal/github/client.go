@@ -1,4 +1,4 @@
-// Package github is a thin GitHub REST/GraphQL client for watchgit.
+// Package github is a thin GitHub REST/GraphQL client for watchgh.
 //
 // It piggybacks on the user's existing credentials rather than implementing
 // OAuth: GITHUB_TOKEN if set, otherwise `gh auth token`.

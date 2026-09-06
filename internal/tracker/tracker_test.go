@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"watchgit/internal/github"
-	"watchgit/internal/store"
-	"watchgit/internal/timeline"
+	"watchgh/internal/github"
+	"watchgh/internal/store"
+	"watchgh/internal/timeline"
 )
 
 func pr(ci, merge, author string) github.TrackedPR {
