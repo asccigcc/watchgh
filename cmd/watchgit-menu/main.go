@@ -77,15 +77,24 @@ func badgeTitle() string {
 	return fmt.Sprintf(" %d", n) // leading space separates it from the icon
 }
 
-// menuItems builds the dropdown fresh each time it opens: newest events first,
-// each clickable to open, then an "open all unread" action.
+// menuItems builds the dropdown fresh each time it opens: unread events only,
+// newest first, each clickable to open, then an "open all unread" action.
 func menuItems() []menuet.MenuItem {
-	events, err := st.List()
+	all, err := st.List()
 	if err != nil {
-		return []menuet.MenuItem{menuet.Regular{Text: "⚠ " + err.Error()}}
+		return append([]menuet.MenuItem{menuet.Regular{Text: "⚠ " + err.Error()}}, daemonItems()...)
+	}
+	// The menu is an inbox, not a history: show only what you haven't visited
+	// (new + still-unread-but-aging). Read items live in `watchgit list`. This
+	// also keeps the dropdown in step with the badge, which counts unread only.
+	var events []timeline.Event
+	for _, e := range all {
+		if e.Unread {
+			events = append(events, e)
+		}
 	}
 	if len(events) == 0 {
-		return []menuet.MenuItem{menuet.Regular{Text: "✓ all caught up"}}
+		return append([]menuet.MenuItem{menuet.Regular{Text: "✓ all caught up"}}, daemonItems()...)
 	}
 	sort.SliceStable(events, func(i, j int) bool {
 		return events[i].TS.After(events[j].TS) // newest at the top
@@ -93,13 +102,11 @@ func menuItems() []menuet.MenuItem {
 
 	now := time.Now()
 	var items []menuet.MenuItem
-	var unread []int64 // every unread seq, not just the shown ones
+	seqs := make([]int64, 0, len(events)) // every unread seq, for "open all"
 	for i, e := range events {
-		if e.Unread {
-			unread = append(unread, e.Seq)
-		}
+		seqs = append(seqs, e.Seq)
 		if i >= maxRows {
-			continue // keep counting unread, but stop adding rows
+			continue // keep collecting seqs, but stop adding rows
 		}
 		seq := e.Seq
 		items = append(items, menuet.Regular{
@@ -115,15 +122,12 @@ func menuItems() []menuet.MenuItem {
 			Color: menuet.LabelTertiary,
 		})
 	}
-	if len(unread) > 0 {
-		u := unread
-		items = append(items,
-			menuet.Separator{},
-			menuet.Regular{
-				Text:    fmt.Sprintf("Open all unread (%d)", len(u)),
-				Clicked: func() { openAll(u) },
-			})
-	}
+	items = append(items,
+		menuet.Separator{},
+		menuet.Regular{
+			Text:    fmt.Sprintf("Open all unread (%d)", len(seqs)),
+			Clicked: func() { openAll(seqs) },
+		})
 	return append(items, daemonItems()...)
 }
 
