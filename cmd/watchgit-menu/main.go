@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"watchgit/internal/daemon"
 	"watchgit/internal/store"
 	"watchgit/internal/timeline"
 
@@ -123,7 +124,29 @@ func menuItems() []menuet.MenuItem {
 				Clicked: func() { openAll(u) },
 			})
 	}
-	return items
+	return append(items, daemonItems()...)
+}
+
+// daemonItems surfaces whether the background poller is alive, with a one-click
+// Start when it isn't. Without this the menu can silently show a stale timeline
+// because nothing is polling. Stop/restart stay in the CLI — this is a viewer,
+// and a dead poller is the only daemon state worth acting on from here.
+func daemonItems() []menuet.MenuItem {
+	s, err := daemon.Query()
+	if err != nil {
+		return nil
+	}
+	if s.Running {
+		return []menuet.MenuItem{
+			menuet.Separator{},
+			menuet.Regular{Text: "Daemon: running ✓", Color: menuet.SystemGreen},
+		}
+	}
+	return []menuet.MenuItem{
+		menuet.Separator{},
+		menuet.Regular{Text: "Daemon: not running", Color: menuet.SystemOrange},
+		menuet.Regular{Text: "Start background poller", Clicked: startDaemon},
+	}
 }
 
 // rowRuns styles one row: an optional NEW/DUE pill, the kind badge in its
@@ -177,6 +200,15 @@ func weight(unread bool) menuet.FontWeight {
 		return menuet.WeightBold
 	}
 	return menuet.WeightRegular
+}
+
+// startDaemon (re)installs the LaunchAgent via the CLI rather than calling
+// daemon.Install here: install points the plist at os.Executable, which must be
+// the watchgit poller, not this viewer binary.
+func startDaemon() {
+	_ = exec.Command(watchgitBin(), "daemon", "install").Run()
+	setState()
+	menuet.App().MenuChanged()
 }
 
 func openItem(seq int64) {

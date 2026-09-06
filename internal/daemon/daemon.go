@@ -82,23 +82,51 @@ func Uninstall() error {
 	return nil
 }
 
+// State is a structured view of the LaunchAgent, for UIs that need to branch on
+// it (the menu-bar app) rather than print the human string Status returns.
+type State struct {
+	Installed bool   // plist exists on disk
+	Loaded    bool   // launchctl knows about the label
+	Running   bool   // launchd reports a live PID
+	PID       string // the running PID, when Running
+}
+
+// Query reads the agent's install/run state without formatting or side effects.
+func Query() (State, error) {
+	plist, err := PlistPath()
+	if err != nil {
+		return State{}, err
+	}
+	if _, err := os.Stat(plist); os.IsNotExist(err) {
+		return State{}, nil
+	}
+	s := State{Installed: true}
+	if out, err := runOut("launchctl", "list", label); err == nil {
+		s.Loaded = true
+		if pid := field(out, "PID"); pid != "" {
+			s.Running, s.PID = true, pid
+		}
+	}
+	return s, nil
+}
+
 // Status reports whether the agent is installed and whether it is running.
 func Status() (string, error) {
-	plist, err := PlistPath()
+	s, err := Query()
 	if err != nil {
 		return "", err
 	}
-	logPath, _ := LogPath()
-	if _, err := os.Stat(plist); os.IsNotExist(err) {
+	if !s.Installed {
 		return "not installed — run `watchgit daemon install`", nil
 	}
+	plist, _ := PlistPath()
+	logPath, _ := LogPath()
 	state := "installed but not loaded"
-	if out, err := runOut("launchctl", "list", label); err == nil {
-		if pid := field(out, "PID"); pid != "" {
-			state = "running (pid " + pid + ")"
-		} else {
-			state = "loaded (idle)"
-		}
+	switch {
+	case s.Running:
+		state = "running (pid " + s.PID + ")"
+	case s.Loaded:
+		state = "loaded (idle)"
 	}
 	return fmt.Sprintf("%s\n  plist: %s\n  log:   %s", state, plist, logPath), nil
 }

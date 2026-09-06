@@ -57,6 +57,12 @@ place. The menu-bar title shows the unread count (`◆ 3`); the dropdown lists t
 newest events with their colored badge and a NEW/DUE pill, and clicking a row
 opens it (marking it read here and on GitHub).
 
+The dropdown also shows the background daemon's health at the bottom — `Daemon:
+running ✓` when the poller is alive, or `Daemon: not running` with a **Start
+background poller** action when it isn't (so the menu never quietly shows a
+stale timeline because nothing is polling). Stop/restart stay in the CLI; a dead
+poller is the only daemon state worth acting on from a viewer.
+
 ```sh
 make menu            # build the .app bundle and launch it (look for ◆)
 make menu-uninstall  # quit and remove the bundle
