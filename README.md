@@ -1,14 +1,15 @@
 # watchgh
 
-A GitHub activity timeline for your terminal — the PRs, reviews, and (soon) CI
-runs that need you, listed in the order they arrive. The command is `wgh`.
+A GitHub activity timeline for your terminal — the PRs, reviews, and CI runs
+that need you, listed in the order they arrive. The command is `wgh`.
 
 ## Status
 
 watchgh polls notifications and tracked-PR CI/merge state into a persistent
-timeline, live or on demand, and can run as an always-on background daemon.
+timeline, viewed in your terminal or the menu bar, with an always-on background
+daemon that does the polling and posts desktop notifications.
 
-- [x] **1. list** — `GET /notifications`, enriched, rendered as timeline rows
+- [x] **1. timeline** — `GET /notifications`, enriched, rendered as timeline rows
 - [x] **2. store** — SQLite persistence, dedupe, read/unread, retention pruning
 - [x] **3. poll loop** — conditional GET (honors `X-Poll-Interval`) +
       macOS desktop notifications for actionable events
@@ -167,4 +168,3 @@ SEQ GUT TIME  BADGE     REPO#NUM        AUTHOR    DETAIL
 - **Badge** — colored by kind; red is reserved for CI failure.
 - **REPO#NUM** — Cmd+click opens the PR (OSC 8; falls back to a raw URL).
 - **AUTHOR** — the PR author; `—` when it's yours.
-```
