@@ -19,6 +19,7 @@ const (
 	KindCIFailed
 	KindBlocked
 	KindUnblocked
+	KindOpenPR // a tracked open PR with no fresher signal (Mine-roster row)
 )
 
 // Event is the source-agnostic timeline row. Both the notifications poller and
@@ -69,6 +70,8 @@ func (k Kind) Badge() Badge {
 		return Badge{"⊘", "block", colYellow}
 	case KindUnblocked:
 		return Badge{"✓", "block", colGreen}
+	case KindOpenPR:
+		return Badge{"⎇", "PR", colBlue}
 	default:
 		return Badge{"·", "note", colDim}
 	}

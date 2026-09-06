@@ -62,7 +62,8 @@ type tui struct {
 	viewer string
 
 	all    []timeline.Event // every stored event, newest first (unfiltered)
-	events []timeline.Event // the active tab's filtered view
+	prs    []timeline.Event // Mine tab: one synthesized row per open PR
+	events []timeline.Event // the active tab's visible rows
 	active int              // current tab index
 	pos    []int            // remembered selection index, per tab
 	sel    int              // index of the selected row (0 = top = newest)
@@ -72,17 +73,22 @@ type tui struct {
 	status string           // footer message (last action, sync state, warnings)
 }
 
-// tabDefs are the timeline lenses, switched with 1-4 / Tab. Together they
-// partition the store by (mine?, CI?, read?): CI holds every CI/merge event,
-// Mine every remaining item on my PRs (read or not), then the non-mine human
-// activity splits into unread (Inbox) and handled (Read).
+// mineTab is the index of Mine in tabDefs; it is sourced from the open-PR
+// roster (one row per open PR) rather than from a filter over stored events.
+const mineTab = 2
+
+// tabDefs are the timeline lenses, switched with 1-4 / Tab. Inbox/Read/CI are
+// filters over stored events: CI holds every CI/merge event, then the non-mine
+// human activity splits into unread (Inbox) and handled (Read). Mine is special
+// — its rows come from the open-PR roster (see rows), so its filter never
+// matches and mine notification events fold into their PR's roster row instead.
 var tabDefs = []struct {
 	name string
 	show func(timeline.Event) bool
 }{
 	{"Inbox", func(e timeline.Event) bool { return e.Unread && !e.IsMine && !isCI(e) }},
 	{"Read", func(e timeline.Event) bool { return !e.Unread && !e.IsMine && !isCI(e) }},
-	{"Mine", func(e timeline.Event) bool { return e.IsMine && !isCI(e) }},
+	{"Mine", func(timeline.Event) bool { return false }},
 	{"CI", func(e timeline.Event) bool { return isCI(e) }},
 }
 
@@ -195,16 +201,8 @@ func (t *tui) switchTab(i int) {
 
 func (t *tui) cycleTab() { t.switchTab((t.active + 1) % len(tabDefs)) }
 
-// count is how many stored events fall under tab i (for the tab-bar badges).
-func (t *tui) count(i int) int {
-	n := 0
-	for _, e := range t.all {
-		if tabDefs[i].show(e) {
-			n++
-		}
-	}
-	return n
-}
+// count is how many rows tab i holds (for the tab-bar badges).
+func (t *tui) count(i int) int { return len(t.tabRows(i)) }
 
 func (t *tui) move(delta int) {
 	t.sel += delta
@@ -264,21 +262,85 @@ func (t *tui) reload() bool {
 	})
 	before := signature(t.all)
 	t.all = stored
+	t.prs = t.mineRoster()
 	t.applyFilter()
 	return before != signature(t.all)
 }
 
-// applyFilter recomputes the visible slice for the active tab and clamps sel.
-func (t *tui) applyFilter() {
-	show := tabDefs[t.active].show
-	view := make([]timeline.Event, 0, len(t.all))
+// tabRows returns the row set backing tab i: the open-PR roster for Mine, else
+// the tab's filter applied over all stored events.
+func (t *tui) tabRows(i int) []timeline.Event {
+	if i == mineTab {
+		return t.prs
+	}
+	show := tabDefs[i].show
+	out := make([]timeline.Event, 0, len(t.all))
 	for _, e := range t.all {
 		if show(e) {
-			view = append(view, e)
+			out = append(out, e)
 		}
 	}
-	t.events = view
+	return out
+}
+
+// applyFilter recomputes the visible slice for the active tab and clamps sel.
+func (t *tui) applyFilter() {
+	t.events = t.tabRows(t.active)
 	t.clampSel()
+}
+
+// mineRoster builds one row per open PR: its latest activity event when there
+// is one, otherwise a synthesized status row so silent PRs still appear.
+func (t *tui) mineRoster() []timeline.Event {
+	prs, err := t.st.OpenPRs()
+	if err != nil {
+		return nil
+	}
+	latest := latestMineByPR(t.all)
+	out := make([]timeline.Event, 0, len(prs))
+	for _, pr := range prs {
+		if e, ok := latest[pr.Key]; ok {
+			out = append(out, e)
+		} else {
+			out = append(out, synthPR(pr))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].TS.After(out[j].TS) })
+	return out
+}
+
+// latestMineByPR indexes the most recent event on each of my PRs by repo#num.
+func latestMineByPR(all []timeline.Event) map[string]timeline.Event {
+	m := make(map[string]timeline.Event)
+	for _, e := range all {
+		if !e.IsMine {
+			continue
+		}
+		k := fmt.Sprintf("%s#%d", e.Repo, e.Number)
+		if cur, ok := m[k]; !ok || e.TS.After(cur.TS) {
+			m[k] = e
+		}
+	}
+	return m
+}
+
+// synthPR renders an open PR that has no timeline event yet as a status row:
+// the CI/merge state picks the badge; attention states (blocked, CI failed) pop
+// as unread while healthy PRs stay quiet.
+func synthPR(pr store.OpenPR) timeline.Event {
+	e := timeline.Event{
+		Source: "graphql", Repo: pr.Repo, Number: pr.Number, URL: pr.URL,
+		TS: pr.UpdatedAt, IsMine: true, Detail: pr.Title, Kind: timeline.KindOpenPR,
+	}
+	switch {
+	case pr.MergeState == "BLOCKED" || pr.MergeState == "DIRTY":
+		e.Kind, e.Unread, e.Actionable = timeline.KindBlocked, true, true
+	case pr.CIState == "FAILURE" || pr.CIState == "ERROR":
+		e.Kind, e.Unread, e.Actionable = timeline.KindCIFailed, true, true
+	case pr.CIState == "SUCCESS":
+		e.Kind = timeline.KindCIPassed
+	}
+	return e
 }
 
 func (t *tui) clampSel() {

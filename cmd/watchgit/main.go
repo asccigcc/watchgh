@@ -303,12 +303,17 @@ func syncTracked(ctx context.Context, c *github.Client, st *store.Store, viewer 
 	if err != nil {
 		return nil, err
 	}
+	mineKeys := make(map[string]bool)
 	var events []timeline.Event
 	for _, pr := range prs {
+		key := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
+		if pr.Author == viewer { // keep the roster of my open PRs (incl. drafts)
+			mineKeys[key] = true
+			_ = st.SetOpenPR(toOpenPR(pr, key))
+		}
 		if pr.IsDraft { // don't nag about a work-in-progress
 			continue
 		}
-		key := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
 		prev, existed, err := st.GetPRState(key)
 		if err != nil {
 			continue
@@ -319,7 +324,17 @@ func syncTracked(ctx context.Context, c *github.Client, st *store.Store, viewer 
 		}
 		events = append(events, evs...)
 	}
+	_ = st.ReconcileOpenPRs(mineKeys) // drop PRs that have since merged/closed
 	return persist(st, events)
+}
+
+// toOpenPR maps a fetched PR to its roster row.
+func toOpenPR(pr github.TrackedPR, key string) store.OpenPR {
+	return store.OpenPR{
+		Key: key, Repo: pr.Repo, Number: pr.Number, Title: pr.Title, URL: pr.URL,
+		Author: pr.Author, IsDraft: pr.IsDraft, CIState: pr.CIState,
+		MergeState: pr.MergeState, UpdatedAt: pr.UpdatedAt,
+	}
 }
 
 // persist upserts events and returns the subset that were newly inserted, each

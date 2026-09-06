@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"watchgit/internal/store"
 	"watchgit/internal/timeline"
 )
 
@@ -88,32 +89,66 @@ func TestPadANSI(t *testing.T) {
 }
 
 func TestTabFilters(t *testing.T) {
-	// One representative event per category; each must land in exactly one tab.
-	evs := []timeline.Event{
-		{Unread: true, IsMine: false, Source: "notification"},  // 0 → Inbox
-		{Unread: false, IsMine: false, Source: "notification"}, // 1 → Read
-		{Unread: true, IsMine: true, Source: "notification"},   // 2 → Mine (unread)
-		{Unread: false, IsMine: true, Source: "notification"},  // 3 → Mine (read still shows)
-		{Unread: true, IsMine: true, Source: "graphql"},        // 4 → CI
-		{Unread: true, IsMine: false, Source: "graphql"},       // 5 → CI (assigned PR)
-		{Unread: false, IsMine: true, Source: "graphql"},       // 6 → CI (handled)
+	// Inbox/Read/CI are lenses over stored events; Mine is roster-sourced, so
+	// its filter never matches and mine events fold into their PR's roster row.
+	cases := []struct {
+		e    timeline.Event
+		want int // matching tab index, or -1 if none (roster-only)
+	}{
+		{timeline.Event{Unread: true, IsMine: false, Source: "notification"}, 0},  // Inbox
+		{timeline.Event{Unread: false, IsMine: false, Source: "notification"}, 1}, // Read
+		{timeline.Event{Unread: true, IsMine: true, Source: "graphql"}, 3},        // CI
+		{timeline.Event{Unread: false, IsMine: true, Source: "graphql"}, 3},       // CI (read)
+		{timeline.Event{Unread: true, IsMine: true, Source: "notification"}, -1},  // Mine → roster
 	}
-	for i, e := range evs {
-		hits := 0
-		for _, d := range tabDefs {
-			if d.show(e) {
+	for i, c := range cases {
+		hits, matched := 0, -1
+		for idx, d := range tabDefs {
+			if d.show(c.e) {
 				hits++
+				matched = idx
 			}
 		}
-		if hits != 1 {
-			t.Errorf("event %d matched %d tabs, want exactly 1", i, hits)
+		if c.want == -1 {
+			if hits != 0 {
+				t.Errorf("case %d: want no show match, got %d", i, hits)
+			}
+			continue
+		}
+		if hits != 1 || matched != c.want {
+			t.Errorf("case %d: matched tab %d (hits %d), want %d", i, matched, hits, c.want)
 		}
 	}
-	want := []int{0, 1, 2, 2, 3, 3, 3} // expected tab index per event
-	for i, e := range evs {
-		if !tabDefs[want[i]].show(e) {
-			t.Errorf("event %d should be in tab %q", i, tabDefs[want[i]].name)
-		}
+}
+
+func TestSynthPR(t *testing.T) {
+	if e := synthPR(store.OpenPR{MergeState: "BLOCKED"}); e.Kind != timeline.KindBlocked || !e.Unread {
+		t.Errorf("blocked PR: got kind %v unread %v, want KindBlocked+unread", e.Kind, e.Unread)
+	}
+	if e := synthPR(store.OpenPR{CIState: "FAILURE"}); e.Kind != timeline.KindCIFailed || !e.Actionable {
+		t.Errorf("failed CI: got kind %v actionable %v, want KindCIFailed+actionable", e.Kind, e.Actionable)
+	}
+	if e := synthPR(store.OpenPR{CIState: "SUCCESS"}); e.Kind != timeline.KindCIPassed || e.Unread {
+		t.Errorf("healthy PR: got kind %v unread %v, want KindCIPassed and not unread", e.Kind, e.Unread)
+	}
+	if e := synthPR(store.OpenPR{Title: "wip"}); e.Kind != timeline.KindOpenPR || e.Detail != "wip" {
+		t.Errorf("quiet PR: got kind %v detail %q, want KindOpenPR + title", e.Kind, e.Detail)
+	}
+}
+
+func TestLatestMineByPR(t *testing.T) {
+	now := time.Now()
+	all := []timeline.Event{
+		{Repo: "o/r", Number: 1, IsMine: true, TS: now.Add(-time.Hour), Detail: "old"},
+		{Repo: "o/r", Number: 1, IsMine: true, TS: now, Detail: "new"},
+		{Repo: "o/r", Number: 2, IsMine: false, TS: now, Detail: "theirs"},
+	}
+	m := latestMineByPR(all)
+	if m["o/r#1"].Detail != "new" {
+		t.Errorf("latest for o/r#1 = %q, want new", m["o/r#1"].Detail)
+	}
+	if _, ok := m["o/r#2"]; ok {
+		t.Error("non-mine event should be excluded from the roster overlay")
 	}
 }
 

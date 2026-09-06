@@ -47,6 +47,20 @@ CREATE TABLE IF NOT EXISTS pr_state (
   merge_state TEXT,
   updated_at  INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS open_prs (
+  pr_key      TEXT PRIMARY KEY,
+  repo        TEXT,
+  number      INTEGER,
+  title       TEXT,
+  url         TEXT,
+  author      TEXT,
+  is_draft    INTEGER,
+  ci_state    TEXT,
+  merge_state TEXT,
+  updated_at  INTEGER,
+  last_seen   INTEGER
+);
 `
 
 // PRState is the last-seen CI/merge status for a tracked PR; the diff engine
@@ -56,6 +70,21 @@ type PRState struct {
 	HeadSHA    string
 	CIState    string
 	MergeState string
+}
+
+// OpenPR is a snapshot of one of the viewer's open PRs, kept as a roster so the
+// Mine tab can list every open PR — even one with no timeline activity yet.
+type OpenPR struct {
+	Key        string
+	Repo       string
+	Number     int
+	Title      string
+	URL        string
+	Author     string
+	IsDraft    bool
+	CIState    string
+	MergeState string
+	UpdatedAt  time.Time
 }
 
 // DefaultPath is the per-user database location (~/.config/watchgit/watchgit.db).
@@ -319,6 +348,80 @@ ON CONFLICT(pr_key) DO UPDATE SET
   merge_state=excluded.merge_state, updated_at=excluded.updated_at`,
 		st.Key, st.HeadSHA, st.CIState, st.MergeState, time.Now().Unix())
 	return err
+}
+
+// SetOpenPR upserts one PR into the roster, stamping last_seen so a later
+// ReconcileOpenPRs can drop rows for PRs that have since closed.
+func (s *Store) SetOpenPR(pr OpenPR) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`
+INSERT INTO open_prs
+  (pr_key, repo, number, title, url, author, is_draft, ci_state, merge_state, updated_at, last_seen)
+VALUES (?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(pr_key) DO UPDATE SET
+  title=excluded.title, url=excluded.url, author=excluded.author,
+  is_draft=excluded.is_draft, ci_state=excluded.ci_state,
+  merge_state=excluded.merge_state, updated_at=excluded.updated_at,
+  last_seen=excluded.last_seen`,
+		pr.Key, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Author, boolToInt(pr.IsDraft),
+		pr.CIState, pr.MergeState, pr.UpdatedAt.Unix(), now)
+	return err
+}
+
+// ReconcileOpenPRs drops roster rows whose key isn't in the current poll — i.e.
+// PRs that have merged or closed since we last saw them.
+func (s *Store) ReconcileOpenPRs(activeKeys map[string]bool) error {
+	rows, err := s.db.Query(`SELECT pr_key FROM open_prs`)
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			rows.Close()
+			return err
+		}
+		if !activeKeys[k] {
+			stale = append(stale, k)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, k := range stale {
+		if _, err := s.db.Exec(`DELETE FROM open_prs WHERE pr_key=?`, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// OpenPRs returns the current roster, most recently updated first.
+func (s *Store) OpenPRs() ([]OpenPR, error) {
+	rows, err := s.db.Query(`
+SELECT pr_key, repo, number, title, url, author, is_draft, ci_state, merge_state, updated_at
+FROM open_prs ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []OpenPR
+	for rows.Next() {
+		var pr OpenPR
+		var draft int
+		var updated int64
+		if err := rows.Scan(&pr.Key, &pr.Repo, &pr.Number, &pr.Title, &pr.URL,
+			&pr.Author, &draft, &pr.CIState, &pr.MergeState, &updated); err != nil {
+			return nil, err
+		}
+		pr.IsDraft = draft == 1
+		pr.UpdatedAt = time.Unix(updated, 0)
+		out = append(out, pr)
+	}
+	return out, rows.Err()
 }
 
 func boolToInt(b bool) int {

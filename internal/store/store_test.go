@@ -85,6 +85,32 @@ func TestReconcileMarksAbsentThreadsRead(t *testing.T) {
 	}
 }
 
+func TestOpenPRRosterUpsertsAndReconciles(t *testing.T) {
+	s := testStore(t)
+	pr := func(key, title string) OpenPR {
+		return OpenPR{Key: key, Repo: "acme/api", Title: title, UpdatedAt: time.Now()}
+	}
+	if err := s.SetOpenPR(pr("acme/api#1", "one")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetOpenPR(pr("acme/api#2", "two")); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.OpenPRs()
+	if len(got) != 2 {
+		t.Fatalf("want 2 roster rows, got %d", len(got))
+	}
+
+	// #2 has since closed: only #1 comes back in the next poll.
+	if err := s.ReconcileOpenPRs(map[string]bool{"acme/api#1": true}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.OpenPRs()
+	if len(got) != 1 || got[0].Key != "acme/api#1" {
+		t.Fatalf("reconcile kept the wrong rows: %+v", got)
+	}
+}
+
 func TestPruneKeepsUnreadRemovesOldRead(t *testing.T) {
 	s := testStore(t)
 	s.Upsert(ev("keep", "t1", true))  // unread -> must survive

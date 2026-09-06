@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // TrackedPR is a normalized open PR we watch for CI/merge transitions.
@@ -21,6 +22,7 @@ type TrackedPR struct {
 	HeadSHA    string
 	CIState    string // SUCCESS, FAILURE, ERROR, PENDING, EXPECTED, or "" (no checks)
 	CheckCount int
+	UpdatedAt  time.Time // last PR update, for the Mine-roster row's age
 }
 
 const trackedQuery = `
@@ -33,7 +35,7 @@ query {
   }
 }
 fragment pr on PullRequest {
-  number url title isDraft
+  number url title isDraft updatedAt
   author { login }
   repository { nameWithOwner }
   mergeStateStatus
@@ -82,11 +84,12 @@ type searchResult struct {
 }
 
 type prNode struct {
-	Number  int    `json:"number"`
-	URL     string `json:"url"`
-	Title   string `json:"title"`
-	IsDraft bool   `json:"isDraft"`
-	Author  struct {
+	Number    int    `json:"number"`
+	URL       string `json:"url"`
+	Title     string `json:"title"`
+	IsDraft   bool   `json:"isDraft"`
+	UpdatedAt string `json:"updatedAt"`
+	Author    struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	Repository struct {
@@ -117,6 +120,9 @@ func (n prNode) toTrackedPR() TrackedPR {
 		Author:     n.Author.Login,
 		Repo:       n.Repository.NameWithOwner,
 		MergeState: n.MergeStateStatus,
+	}
+	if t, err := time.Parse(time.RFC3339, n.UpdatedAt); err == nil {
+		pr.UpdatedAt = t
 	}
 	if len(n.Commits.Nodes) > 0 {
 		commit := n.Commits.Nodes[0].Commit
