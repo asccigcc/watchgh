@@ -8,7 +8,7 @@ BINDIR ?= $(HOME)/go/bin
 APPDIR ?= $(HOME)/Applications
 APP    := $(APPDIR)/watchgit-menu.app
 
-.PHONY: build install test menu-app menu menu-uninstall
+.PHONY: build install test icon menu-app menu menu-uninstall
 
 # Build the pure-Go CLI/daemon binary in the working directory.
 build:
@@ -21,13 +21,19 @@ install:
 test:
 	go test ./...
 
+# Regenerate the menu-bar icon PNGs from an SF Symbol (needs the Swift toolchain).
+# The generated PNGs are committed, so this is only needed when changing the icon.
+icon:
+	swift tools/genicon/genicon.swift eye cmd/watchgit-menu/Resources
+
 # Assemble the menu-bar .app bundle. menuet crashes as a bare binary
 # (bundleProxyForCurrentProcess is nil), so it must live in a bundle.
 menu-app: install
 	@rm -rf "$(APP)"
-	@mkdir -p "$(APP)/Contents/MacOS"
+	@mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources"
 	go build -o "$(APP)/Contents/MacOS/watchgit-menu" ./cmd/watchgit-menu
 	@cp cmd/watchgit-menu/Info.plist "$(APP)/Contents/Info.plist"
+	@cp cmd/watchgit-menu/Resources/*.png "$(APP)/Contents/Resources/"
 	@# GUI apps launched via `open` don't inherit the shell PATH, so give the
 	@# bundle a direct link to the CLI it delegates open/read actions to.
 	@ln -sf "$(BINDIR)/watchgit" "$(APP)/Contents/MacOS/watchgit"

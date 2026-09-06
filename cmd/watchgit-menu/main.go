@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	maxRows    = 25               // cap on dropdown rows
-	staleAfter = 24 * time.Hour   // unread + actionable past this earns a "DUE" pill
-	badgeTick  = 5 * time.Second  // how often the menu-bar count refreshes
+	maxRows    = 5              // cap on dropdown rows so the menu stays glanceable
+	staleAfter = 24 * time.Hour // unread + actionable past this earns a "DUE" pill
+	badgeTick  = 5 * time.Second
+	iconName   = "menubar" // template PNG in the bundle's Resources
 )
 
 // st is the shared read handle on the store; WAL mode lets it read while the
@@ -55,17 +56,24 @@ func main() {
 // refreshBadge keeps the menu-bar title's unread count current.
 func refreshBadge() {
 	for {
-		menuet.App().SetMenuState(&menuet.MenuState{Title: badgeTitle()})
+		setState()
 		time.Sleep(badgeTick)
 	}
+}
+
+// setState draws the menu-bar item: the eye icon plus the unread count (icon
+// alone when nothing is unread). menuet replaces the whole state each call, so
+// every updater goes through here to keep the icon.
+func setState() {
+	menuet.App().SetMenuState(&menuet.MenuState{Image: iconName, Title: badgeTitle()})
 }
 
 func badgeTitle() string {
 	n, err := st.UnreadCount()
 	if err != nil || n == 0 {
-		return "◆"
+		return ""
 	}
-	return fmt.Sprintf("◆ %d", n)
+	return fmt.Sprintf(" %d", n) // leading space separates it from the icon
 }
 
 // menuItems builds the dropdown fresh each time it opens: newest events first,
@@ -84,13 +92,13 @@ func menuItems() []menuet.MenuItem {
 
 	now := time.Now()
 	var items []menuet.MenuItem
-	var unread []int64
+	var unread []int64 // every unread seq, not just the shown ones
 	for i, e := range events {
-		if i >= maxRows {
-			break
-		}
 		if e.Unread {
 			unread = append(unread, e.Seq)
+		}
+		if i >= maxRows {
+			continue // keep counting unread, but stop adding rows
 		}
 		seq := e.Seq
 		items = append(items, menuet.Regular{
@@ -100,6 +108,12 @@ func menuItems() []menuet.MenuItem {
 		})
 	}
 
+	if more := len(events) - maxRows; more > 0 {
+		items = append(items, menuet.Regular{
+			Text:  fmt.Sprintf("…%d more — run `watchgit list`", more),
+			Color: menuet.LabelTertiary,
+		})
+	}
 	if len(unread) > 0 {
 		u := unread
 		items = append(items,
@@ -167,7 +181,7 @@ func weight(unread bool) menuet.FontWeight {
 
 func openItem(seq int64) {
 	_ = exec.Command(watchgitBin(), "open", strconv.FormatInt(seq, 10)).Run()
-	menuet.App().SetMenuState(&menuet.MenuState{Title: badgeTitle()})
+	setState()
 	menuet.App().MenuChanged()
 }
 
@@ -175,7 +189,7 @@ func openAll(seqs []int64) {
 	for _, seq := range seqs {
 		_ = exec.Command(watchgitBin(), "open", strconv.FormatInt(seq, 10)).Run()
 	}
-	menuet.App().SetMenuState(&menuet.MenuState{Title: badgeTitle()})
+	setState()
 	menuet.App().MenuChanged()
 }
 
