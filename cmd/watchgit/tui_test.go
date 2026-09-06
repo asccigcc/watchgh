@@ -92,10 +92,11 @@ func TestTabFilters(t *testing.T) {
 	evs := []timeline.Event{
 		{Unread: true, IsMine: false, Source: "notification"},  // 0 → Inbox
 		{Unread: false, IsMine: false, Source: "notification"}, // 1 → Read
-		{Unread: true, IsMine: true, Source: "notification"},   // 2 → Mine
-		{Unread: true, IsMine: true, Source: "graphql"},        // 3 → CI
-		{Unread: true, IsMine: false, Source: "graphql"},       // 4 → CI (assigned PR)
-		{Unread: false, IsMine: true, Source: "graphql"},       // 5 → Read (handled CI)
+		{Unread: true, IsMine: true, Source: "notification"},   // 2 → Mine (unread)
+		{Unread: false, IsMine: true, Source: "notification"},  // 3 → Mine (read still shows)
+		{Unread: true, IsMine: true, Source: "graphql"},        // 4 → CI
+		{Unread: true, IsMine: false, Source: "graphql"},       // 5 → CI (assigned PR)
+		{Unread: false, IsMine: true, Source: "graphql"},       // 6 → CI (handled)
 	}
 	for i, e := range evs {
 		hits := 0
@@ -108,7 +109,7 @@ func TestTabFilters(t *testing.T) {
 			t.Errorf("event %d matched %d tabs, want exactly 1", i, hits)
 		}
 	}
-	want := []int{0, 1, 2, 3, 3, 1} // expected tab index per event
+	want := []int{0, 1, 2, 2, 3, 3, 3} // expected tab index per event
 	for i, e := range evs {
 		if !tabDefs[want[i]].show(e) {
 			t.Errorf("event %d should be in tab %q", i, tabDefs[want[i]].name)

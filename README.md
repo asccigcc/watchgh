@@ -43,9 +43,9 @@ It's organized into four tabs (the counts update live):
 | Tab | Shows |
 | --- | ----- |
 | **1 · Inbox** (default) | unread items others put on you — review requests + assignments |
-| **2 · Read** | everything you've already handled (the archive) |
-| **3 · Mine** | unread activity on your own PRs — approvals, review comments |
-| **4 · CI** | unread build pass/fail + blocked/clean on your tracked PRs |
+| **2 · Read** | items you've already handled — excludes your own PRs |
+| **3 · Mine** | all activity on your own PRs — approvals, review comments — read or unread |
+| **4 · CI** | build pass/fail + blocked/clean on your tracked PRs |
 
 | Key            | Action                                        |
 | -------------- | --------------------------------------------- |

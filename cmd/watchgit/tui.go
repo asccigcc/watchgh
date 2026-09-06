@@ -73,16 +73,17 @@ type tui struct {
 }
 
 // tabDefs are the timeline lenses, switched with 1-4 / Tab. Together they
-// partition the store: every unread item lands in exactly one of Inbox/Mine/CI
-// by (mine?, CI?), and Read collects everything already handled.
+// partition the store by (mine?, CI?, read?): CI holds every CI/merge event,
+// Mine every remaining item on my PRs (read or not), then the non-mine human
+// activity splits into unread (Inbox) and handled (Read).
 var tabDefs = []struct {
 	name string
 	show func(timeline.Event) bool
 }{
 	{"Inbox", func(e timeline.Event) bool { return e.Unread && !e.IsMine && !isCI(e) }},
-	{"Read", func(e timeline.Event) bool { return !e.Unread }},
-	{"Mine", func(e timeline.Event) bool { return e.Unread && e.IsMine && !isCI(e) }},
-	{"CI", func(e timeline.Event) bool { return e.Unread && isCI(e) }},
+	{"Read", func(e timeline.Event) bool { return !e.Unread && !e.IsMine && !isCI(e) }},
+	{"Mine", func(e timeline.Event) bool { return e.IsMine && !isCI(e) }},
+	{"CI", func(e timeline.Event) bool { return isCI(e) }},
 }
 
 // isCI marks the tracked-PR engine's events (CI status + blocked/clean), which
