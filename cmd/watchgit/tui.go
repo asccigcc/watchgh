@@ -56,6 +56,7 @@ func runTUI(ctx context.Context) error {
 	// Freshen once at launch so the timeline is useful even with no daemon.
 	syncNotifications(ctx, c, st, viewer)
 	syncTracked(ctx, c, st, viewer)
+	syncReviews(ctx, c, st)
 	st.Prune(cfg.Retention)
 
 	return (&tui{ctx: ctx, st: st, c: c, viewer: viewer}).run()
@@ -242,12 +243,15 @@ func (t *tui) act(open bool) {
 func (t *tui) sync(refreshed chan<- struct{}) {
 	_, nerr := syncNotifications(t.ctx, t.c, t.st, t.viewer)
 	_, terr := syncTracked(t.ctx, t.c, t.st, t.viewer)
+	rerr := syncReviews(t.ctx, t.c, t.st)
 	t.st.Prune(cfg.Retention)
 	switch {
 	case nerr != nil:
 		t.status = "⚠ sync: " + nerr.Error()
 	case terr != nil:
 		t.status = "⚠ tracked-PR sync: " + terr.Error()
+	case rerr != nil:
+		t.status = "⚠ review-state sync: " + rerr.Error()
 	default:
 		t.status = "synced " + time.Now().Format("15:04:05")
 	}

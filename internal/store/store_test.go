@@ -137,6 +137,46 @@ func TestBackfillDetailsRewritesOnlyMatchingTokens(t *testing.T) {
 	}
 }
 
+func TestReconcileReviewRequestsResolvesAndResurfaces(t *testing.T) {
+	s := testStore(t)
+	// ev() builds a KindReviewRequested row on acme/api#1.
+	s.Upsert(ev("a", "t1", true))
+
+	// Reviewed at head -> auto-resolve (drops from the Inbox).
+	if err := s.ReconcileReviewRequests([]ReviewState{{Repo: "acme/api", Number: 1, AtHead: true}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.List()
+	if got[0].Unread {
+		t.Fatal("reviewed-at-head request should be marked read")
+	}
+
+	// New commits since the review -> re-surface as unread.
+	if err := s.ReconcileReviewRequests([]ReviewState{{Repo: "acme/api", Number: 1, AtHead: false}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.List()
+	if !got[0].Unread {
+		t.Fatal("stale review should re-surface the request as unread")
+	}
+}
+
+func TestReconcileReviewRequestsLeavesOtherKindsAlone(t *testing.T) {
+	s := testStore(t)
+	// A comment (not a review request) on the same PR must be untouched.
+	e := ev("c", "t1", true)
+	e.Kind = timeline.KindCommented
+	s.Upsert(e)
+
+	if err := s.ReconcileReviewRequests([]ReviewState{{Repo: "acme/api", Number: 1, AtHead: true}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.List()
+	if !got[0].Unread {
+		t.Fatal("a non-review-request event should not be auto-resolved")
+	}
+}
+
 func TestPruneKeepsUnreadRemovesOldRead(t *testing.T) {
 	s := testStore(t)
 	s.Upsert(ev("keep", "t1", true))  // unread -> must survive

@@ -348,6 +348,39 @@ func (s *Store) BackfillDetails(m map[string]string) error {
 	return err
 }
 
+// ReviewState is a per-PR verdict for reconciling review-request items: whether
+// the viewer's latest review covers the PR's current head commit.
+type ReviewState struct {
+	Repo   string
+	Number int
+	AtHead bool
+}
+
+// ReconcileReviewRequests drives the read-state of review-request items from
+// whether the viewer has actually reviewed each PR's current head. A request
+// whose review is up to date is auto-resolved (marked read, so it drops from the
+// Inbox); one whose review has gone stale — new commits pushed on top of it — is
+// re-surfaced (marked unread again). Only KindReviewRequested rows are touched;
+// PRs the viewer hasn't reviewed produce no verdict and are left as they are.
+func (s *Store) ReconcileReviewRequests(states []ReviewState) error {
+	for _, rs := range states {
+		var err error
+		if rs.AtHead {
+			_, err = s.db.Exec(
+				`UPDATE events SET read_at=? WHERE kind=? AND repo=? AND number=? AND read_at IS NULL`,
+				time.Now().Unix(), int(timeline.KindReviewRequested), rs.Repo, rs.Number)
+		} else {
+			_, err = s.db.Exec(
+				`UPDATE events SET read_at=NULL, github_unread=1 WHERE kind=? AND repo=? AND number=?`,
+				int(timeline.KindReviewRequested), rs.Repo, rs.Number)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // GetPRState returns the stored state for a PR and whether a row existed.
 func (s *Store) GetPRState(key string) (PRState, bool, error) {
 	st := PRState{Key: key}

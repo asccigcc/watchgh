@@ -109,6 +109,9 @@ func runList(ctx context.Context) error {
 	if _, err := syncTracked(ctx, c, st, viewer); err != nil {
 		fmt.Fprintln(os.Stderr, dim("⚠ tracked-PR poll failed: "+err.Error()))
 	}
+	if err := syncReviews(ctx, c, st); err != nil {
+		fmt.Fprintln(os.Stderr, dim("⚠ review-state poll failed: "+err.Error()))
+	}
 	if err := st.Prune(cfg.Retention); err != nil {
 		return fmt.Errorf("pruning: %w", err)
 	}
@@ -237,6 +240,7 @@ func newWatcher(c *github.Client, st *store.Store, viewer string, warn func(stri
 func (w *watcher) baseline(ctx context.Context) []timeline.Event {
 	syncNotifications(ctx, w.c, w.st, w.viewer)
 	syncTracked(ctx, w.c, w.st, w.viewer)
+	syncReviews(ctx, w.c, w.st)
 	w.st.Prune(cfg.Retention)
 	stored, _ := w.st.List()
 	return stored
@@ -271,6 +275,12 @@ func (w *watcher) tick(ctx context.Context) []timeline.Event {
 		fresh = append(fresh, tf...)
 	} else {
 		w.warn("tracked-PR poll failed: " + err.Error())
+	}
+
+	// Review state has no notification signal (a fresh commit on a PR you've
+	// reviewed fires nothing) — reconcile every tick, like the tracked-PR poll.
+	if err := syncReviews(ctx, w.c, w.st); err != nil {
+		w.warn("review-state poll failed: " + err.Error())
 	}
 
 	w.st.Prune(cfg.Retention)
@@ -326,6 +336,23 @@ func syncTracked(ctx context.Context, c *github.Client, st *store.Store, viewer 
 	}
 	_ = st.ReconcileOpenPRs(mineKeys) // drop PRs that have since merged/closed
 	return persist(st, events)
+}
+
+// syncReviews reconciles review-request items against whether the viewer has
+// actually reviewed each PR's current head: it auto-resolves requests already
+// reviewed and re-surfaces ones whose review went stale after new commits. It
+// emits no new events, so — unlike the notification and tracked-PR syncs — it
+// returns nothing but an error.
+func syncReviews(ctx context.Context, c *github.Client, st *store.Store) error {
+	states, err := c.ReviewStates(ctx)
+	if err != nil {
+		return err
+	}
+	verdicts := make([]store.ReviewState, len(states))
+	for i, rs := range states {
+		verdicts[i] = store.ReviewState{Repo: rs.Repo, Number: rs.Number, AtHead: rs.AtHead}
+	}
+	return st.ReconcileReviewRequests(verdicts)
 }
 
 // toOpenPR maps a fetched PR to its roster row.
