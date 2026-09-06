@@ -41,11 +41,21 @@ func Render(events []Event, o RenderOpts) string {
 	})
 	var b strings.Builder
 	for _, e := range events {
-		b.WriteString(renderRow(e, o))
+		row := renderRow(e, o)
+		// Fallback link when the terminal can't render OSC 8 (e.g. piped output).
+		if !o.Hyperlinks && e.URL != "" {
+			row += "  " + colorize(e.URL, colDim, o.Color)
+		}
+		b.WriteString(row)
 		b.WriteByte('\n')
 	}
 	return b.String()
 }
+
+// RenderRow renders a single event as one line — no trailing newline and no
+// raw-URL fallback — for interactive callers like the TUI, which navigate by
+// selection rather than clicking. o.Color and o.Hyperlinks apply as usual.
+func RenderRow(e Event, o RenderOpts) string { return renderRow(e, o) }
 
 func renderRow(e Event, o RenderOpts) string {
 	// SEQ (stable local number for `watchgit open N`), dim, right-aligned in 4.
@@ -82,10 +92,6 @@ func renderRow(e Event, o RenderOpts) string {
 	// Read/history rows dim as a freshness cue.
 	if !e.Unread && o.Color {
 		row = string(colDim) + row + string(colReset)
-	}
-	// Fallback link when the terminal can't render OSC 8.
-	if !o.Hyperlinks && e.URL != "" {
-		row += "  " + colorize(e.URL, colDim, o.Color)
 	}
 	return row
 }

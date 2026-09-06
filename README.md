@@ -22,7 +22,8 @@ timeline, live or on demand, and can run as an always-on background daemon.
 ## Usage
 
 ```sh
-watchgit list             # or just: watchgit — print the stored timeline
+watchgit                  # interactive full-screen timeline (falls back to list when piped)
+watchgit list             # print the stored timeline and exit
 watchgit watch            # stream new events live + desktop notifications
 watchgit open 42          # open item 42 in browser, mark read (here + GitHub)
 watchgit read 42          # mark item 42 read without opening
@@ -31,6 +32,26 @@ watchgit daemon install   # run the poller in the background via launchd (starts
 watchgit daemon status    # is it running? where are the plist and log?
 watchgit daemon uninstall # stop and remove it
 ```
+
+## Interactive timeline
+
+Running `watchgit` with no arguments (attached to a terminal) opens a full-screen
+timeline on the alternate screen — the terminal counterpart to the menu-bar app:
+
+| Key            | Action                                        |
+| -------------- | --------------------------------------------- |
+| `↑`/`↓`, `k`/`j` | move the selection                          |
+| `g` / `G`      | jump to the newest / oldest row               |
+| `PgUp`/`PgDn`  | page by a screenful                           |
+| `⏎`            | open the selected item in the browser + mark read |
+| `r`            | mark the selected item read without opening   |
+| `R`            | poll GitHub now (a manual refresh)            |
+| `q` / `Esc` / `Ctrl-C` | quit                                  |
+
+It's a pure viewer over the store — the daemon (or a one-shot sync at launch)
+fills it — and it re-reads every couple of seconds, so events the daemon collects
+appear live. Piped or redirected (`watchgit | less`), it prints like `list` so
+scripts keep working.
 
 ## Background daemon
 

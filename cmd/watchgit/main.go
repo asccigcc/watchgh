@@ -31,7 +31,7 @@ var cfg = config.Defaults()
 
 func main() {
 	args := os.Args[1:]
-	cmd := "list"
+	cmd := ""
 	if len(args) > 0 {
 		cmd = args[0]
 		args = args[1:]
@@ -49,6 +49,14 @@ func main() {
 
 	var err error
 	switch cmd {
+	case "":
+		// Bare `watchgit` opens the interactive timeline when attached to a
+		// terminal; piped or redirected, it prints like `list` so scripts work.
+		if isTerminal(os.Stdout) && isTerminal(os.Stdin) {
+			err = runTUI(ctx)
+		} else {
+			err = runList(ctx)
+		}
 	case "list":
 		err = runList(ctx)
 	case "watch":
@@ -76,7 +84,8 @@ func usage() {
 	fmt.Println(`watchgit — a GitHub activity timeline
 
 Usage:
-  watchgit [list]        Print the stored timeline (polls once first)
+  watchgit               Interactive timeline (arrows/⏎/r/q); prints like list when piped
+  watchgit list          Print the stored timeline (polls once first)
   watchgit watch         Stream new events live with desktop notifications
   watchgit open <n>      Open item <n> in the browser and mark it read (here + GitHub)
   watchgit read <n>      Mark item <n> read without opening
@@ -367,24 +376,35 @@ func runMark(ctx context.Context, args []string, open bool) error {
 	if err != nil {
 		return fmt.Errorf("no item #%d in the timeline", seq)
 	}
+	if err := applyMark(ctx, st, e, open); err != nil {
+		fmt.Fprintln(os.Stderr, "watchgit:", err)
+	}
+	fmt.Printf("✓ #%d marked read\n", seq)
+	return nil
+}
+
+// applyMark opens the event's URL (when open) and marks it read locally, plus on
+// GitHub for notification-backed items. Shared by the `open`/`read` commands and
+// the TUI. A returned error means a best-effort step (browser or GitHub sync)
+// failed — the local read still succeeded — so callers surface it as a warning.
+func applyMark(ctx context.Context, st *store.Store, e timeline.Event, open bool) error {
 	if open && e.URL != "" {
 		if err := exec.Command("open", e.URL).Run(); err != nil {
-			fmt.Fprintln(os.Stderr, "watchgit: could not open browser:", err)
+			return fmt.Errorf("could not open browser: %w", err)
 		}
 	}
-	if err := st.MarkRead(seq); err != nil {
+	if err := st.MarkRead(e.Seq); err != nil {
 		return fmt.Errorf("marking read: %w", err)
 	}
 	if e.Source == "notification" && e.ThreadID != "" {
 		c, err := github.New()
 		if err != nil {
-			return err
+			return fmt.Errorf("marked read locally, but GitHub sync failed: %w", err)
 		}
 		if err := c.MarkThreadRead(ctx, e.ThreadID); err != nil {
-			fmt.Fprintln(os.Stderr, "watchgit: marked read locally, but GitHub sync failed:", err)
+			return fmt.Errorf("marked read locally, but GitHub sync failed: %w", err)
 		}
 	}
-	fmt.Printf("✓ #%d marked read\n", seq)
 	return nil
 }
 
