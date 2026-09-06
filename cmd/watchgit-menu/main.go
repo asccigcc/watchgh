@@ -16,6 +16,7 @@ import (
 
 	"watchgit/internal/config"
 	"watchgit/internal/daemon"
+	"watchgit/internal/ingest"
 	"watchgit/internal/store"
 	"watchgit/internal/timeline"
 
@@ -47,6 +48,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer st.Close()
+	_ = ingest.Backfill(st) // one-off cleanup of pre-fix rows
 
 	if c, err := config.Load(); err != nil {
 		fmt.Fprintln(os.Stderr, "watchgit-menu: config:", err, "— using defaults")

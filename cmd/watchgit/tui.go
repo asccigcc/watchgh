@@ -369,7 +369,7 @@ func signature(events []timeline.Event) string {
 }
 
 func (t *tui) bodyHeight() int {
-	h := t.rows - 2 // header + footer
+	h := t.rows - 3 // title + tab bar + footer
 	if h < 1 {
 		return 1
 	}
@@ -394,6 +394,7 @@ func (t *tui) draw() {
 
 	var b strings.Builder
 	b.WriteString(cursorHome)
+	b.WriteString(t.titleBar() + clearEOL + "\r\n")
 	b.WriteString(t.header() + clearEOL + "\r\n")
 
 	if len(t.events) == 0 {
@@ -416,6 +417,11 @@ func (t *tui) draw() {
 	fmt.Fprint(os.Stdout, b.String())
 }
 
+// titleBar is the app name, a full-width reverse-video bar across the top.
+func (t *tui) titleBar() string {
+	return reverse + padANSI(" ◆ watchgit — GitHub activity timeline", t.cols) + reset
+}
+
 // header draws the tab bar: the active tab reversed, each with its live count.
 func (t *tui) header() string {
 	var b strings.Builder
@@ -430,20 +436,29 @@ func (t *tui) header() string {
 	return truncateANSI(b.String(), t.cols)
 }
 
+// footer is a status bar: keybinds + position on a reverse-video background,
+// with the viewer login trailing plain (no background) at the right edge.
 func (t *tui) footer() string {
 	pos := ""
 	if len(t.events) > 0 {
 		pos = fmt.Sprintf(" [%d/%d]", t.sel+1, len(t.events))
 	}
-	line := fmt.Sprintf(" %s%s · @%s", t.status, pos, t.viewer)
-	return dimSeq + truncateANSI(line, t.cols) + reset
+	status := fmt.Sprintf(" %s%s", t.status, pos)
+	user := fmt.Sprintf(" @%s ", t.viewer)
+
+	uw := utf8.RuneCountInString(user)
+	if uw > t.cols {
+		uw = t.cols
+	}
+	bar := reverse + padANSI(status, t.cols-uw) + reset
+	return bar + dimSeq + padANSI(user, uw) + reset
 }
 
 // rowText renders one timeline row to fit the width. The selected row is drawn
 // plain and reverse-video across the full width; others reuse the colored CLI
 // renderer, so the two surfaces stay pixel-identical.
 func (t *tui) rowText(e timeline.Event, selected bool) string {
-	o := timeline.RenderOpts{Now: time.Now(), StaleAfter: cfg.StaleAfter, Color: !selected}
+	o := timeline.RenderOpts{Now: time.Now(), StaleAfter: cfg.StaleAfter, Color: !selected, HideSeq: true}
 	row := timeline.RenderRow(e, o)
 	if selected {
 		return reverse + padANSI(row, t.cols) + reset

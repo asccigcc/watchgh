@@ -29,6 +29,7 @@ const defaultStaleAfter = 24 * time.Hour
 type RenderOpts struct {
 	Color      bool          // emit ANSI colors
 	Hyperlinks bool          // emit OSC 8 hyperlinks (else append a raw URL)
+	HideSeq    bool          // drop the leading seq column (TUI navigates by selection, not number)
 	Now        time.Time     // reference time for relative timestamps
 	StaleAfter time.Duration // DUE threshold; zero falls back to defaultStaleAfter
 }
@@ -59,7 +60,11 @@ func RenderRow(e Event, o RenderOpts) string { return renderRow(e, o) }
 
 func renderRow(e Event, o RenderOpts) string {
 	// SEQ (stable local number for `watchgit open N`), dim, right-aligned in 4.
-	seq := colorize(padLeft(fmt.Sprintf("%d", e.Seq), 4), colDim, o.Color)
+	// The TUI hides it — it opens the selected row, so the number is just noise.
+	seq := ""
+	if !o.HideSeq {
+		seq = colorize(padLeft(fmt.Sprintf("%d", e.Seq), 4), colDim, o.Color) + " "
+	}
 
 	// GUTTER: your state — DUE (needs you, aging), NEW (unread), blank (read).
 	label, gcolor := gutterMark(e, o.Now, o.staleAfter())
@@ -86,7 +91,7 @@ func renderRow(e Event, o RenderOpts) string {
 	authorText = truncate(authorText, 11)
 	author := colorizeIf(e.IsMine, padRight(authorText, 11), colDim, o.Color)
 
-	row := fmt.Sprintf("%s %s %s  %s  %s  %s  %s",
+	row := fmt.Sprintf("%s%s %s  %s  %s  %s  %s",
 		seq, gutter, age, badgeCell, ref, author, e.Detail)
 
 	// Read/history rows dim as a freshness cue.

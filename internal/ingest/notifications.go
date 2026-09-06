@@ -4,8 +4,13 @@ package ingest
 
 import (
 	"watchgit/internal/github"
+	"watchgit/internal/store"
 	"watchgit/internal/timeline"
 )
+
+// Backfill runs the one-off cleanup that rewrites events still holding a raw
+// GitHub reason token as their detail. Idempotent; safe to call at every start.
+func Backfill(st *store.Store) error { return st.BackfillDetails(DetailBackfill()) }
 
 // FromNotification maps a notification thread (enriched with its subject) into
 // a timeline event. viewer is the authenticated login, used for "is this mine?".
