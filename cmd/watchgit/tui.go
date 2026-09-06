@@ -79,22 +79,24 @@ type tui struct {
 	status string           // footer message (last action, sync state, warnings)
 }
 
-// mineTab is the index of Mine in tabDefs; it is sourced from the open-PR
+// mineTab is the index of "My PRs" in tabDefs; it is sourced from the open-PR
 // roster (one row per open PR) rather than from a filter over stored events.
-const mineTab = 2
+const mineTab = 1
 
-// tabDefs are the timeline lenses, switched with 1-4 / Tab. Inbox/Read/CI are
-// filters over stored events: CI holds every CI/merge event, then the non-mine
-// human activity splits into unread (Inbox) and handled (Read). Mine is special
-// — its rows come from the open-PR roster (see rows), so its filter never
-// matches and mine notification events fold into their PR's roster row instead.
+// tabDefs are the timeline lenses, switched with 1-4 / Tab, ordered by priority:
+// what others need from you, your own PRs, then history and CI detail.
+// Inbox/Read/CI are filters over stored events: CI holds every CI/merge event,
+// then the non-mine human activity splits into unread (Inbox) and handled
+// (Read). "My PRs" is special — its rows come from the open-PR roster (see
+// tabRows), so its filter never matches and mine notification events fold into
+// their PR's roster row instead.
 var tabDefs = []struct {
 	name string
 	show func(timeline.Event) bool
 }{
 	{"Inbox", func(e timeline.Event) bool { return e.Unread && !e.IsMine && !isCI(e) }},
+	{"My PRs", func(timeline.Event) bool { return false }},
 	{"Read", func(e timeline.Event) bool { return !e.Unread && !e.IsMine && !isCI(e) }},
-	{"Mine", func(timeline.Event) bool { return false }},
 	{"CI", func(e timeline.Event) bool { return isCI(e) }},
 }
 

@@ -89,17 +89,18 @@ func TestPadANSI(t *testing.T) {
 }
 
 func TestTabFilters(t *testing.T) {
-	// Inbox/Read/CI are lenses over stored events; Mine is roster-sourced, so
-	// its filter never matches and mine events fold into their PR's roster row.
+	// Inbox/Read/CI are lenses over stored events; "My PRs" is roster-sourced,
+	// so its filter never matches and mine events fold into their PR's roster row.
+	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3).
 	cases := []struct {
 		e    timeline.Event
 		want int // matching tab index, or -1 if none (roster-only)
 	}{
 		{timeline.Event{Unread: true, IsMine: false, Source: "notification"}, 0},  // Inbox
-		{timeline.Event{Unread: false, IsMine: false, Source: "notification"}, 1}, // Read
+		{timeline.Event{Unread: false, IsMine: false, Source: "notification"}, 2}, // Read
 		{timeline.Event{Unread: true, IsMine: true, Source: "graphql"}, 3},        // CI
 		{timeline.Event{Unread: false, IsMine: true, Source: "graphql"}, 3},       // CI (read)
-		{timeline.Event{Unread: true, IsMine: true, Source: "notification"}, -1},  // Mine → roster
+		{timeline.Event{Unread: true, IsMine: true, Source: "notification"}, -1},  // My PRs → roster
 	}
 	for i, c := range cases {
 		hits, matched := 0, -1
