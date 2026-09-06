@@ -321,10 +321,11 @@ func makeRaw(fd int) (*unix.Termios, error) {
 	raw.Lflag &^= unix.ECHO | unix.ICANON | unix.ISIG | unix.IEXTEN
 	raw.Cflag &^= unix.CSIZE | unix.PARENB
 	raw.Cflag |= unix.CS8
-	// VMIN=0/VTIME=1: reads return after 0.1s even with no input, which keeps
-	// the reader responsive and lets a lone ESC be told apart from a sequence.
-	raw.Cc[unix.VMIN] = 0
-	raw.Cc[unix.VTIME] = 1
+	// VMIN=1/VTIME=0: block until at least one byte arrives. A timed read
+	// (VTIME>0) would return 0 bytes when idle, which Go's os.File.Read reports
+	// as io.EOF — closing the key channel and quitting the TUI on its own.
+	raw.Cc[unix.VMIN] = 1
+	raw.Cc[unix.VTIME] = 0
 	if err := unix.IoctlSetTermios(fd, unix.TIOCSETA, &raw); err != nil {
 		return nil, err
 	}
