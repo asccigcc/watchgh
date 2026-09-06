@@ -36,7 +36,9 @@ watchgit daemon uninstall # stop and remove it
 ## Interactive timeline
 
 Running `watchgit` with no arguments (attached to a terminal) opens a full-screen
-timeline on the alternate screen — the terminal counterpart to the menu-bar app:
+timeline on the alternate screen — the terminal counterpart to the menu-bar app.
+A title bar tops the screen; a status bar along the bottom carries the keybindings,
+your position, and the viewer login.
 
 It's organized into four tabs (the counts update live):
 
