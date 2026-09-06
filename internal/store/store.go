@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"watchgit/internal/timeline"
@@ -320,6 +321,30 @@ func (s *Store) Prune(maxAge time.Duration) error {
 	_, err := s.db.Exec(
 		`DELETE FROM events WHERE last_seen < ? AND (read_at IS NOT NULL OR github_unread=0)`,
 		cutoff)
+	return err
+}
+
+// BackfillDetails rewrites stored rows whose detail is one of the given raw
+// tokens (keys) to its mapped phrase (value) in a single UPDATE. It's a one-off
+// cleanup for events saved before the classifier stopped echoing GitHub's raw
+// notification reason; idempotent, so re-running it touches nothing.
+func (s *Store) BackfillDetails(m map[string]string) error {
+	if len(m) == 0 {
+		return nil
+	}
+	var q strings.Builder
+	q.WriteString("UPDATE events SET detail = CASE detail")
+	whenArgs := make([]any, 0, len(m)*2)
+	inArgs := make([]any, 0, len(m))
+	ph := make([]string, 0, len(m))
+	for from, to := range m {
+		q.WriteString(" WHEN ? THEN ?")
+		whenArgs = append(whenArgs, from, to)
+		inArgs = append(inArgs, from)
+		ph = append(ph, "?")
+	}
+	q.WriteString(" END WHERE detail IN (" + strings.Join(ph, ",") + ")")
+	_, err := s.db.Exec(q.String(), append(whenArgs, inArgs...)...)
 	return err
 }
 

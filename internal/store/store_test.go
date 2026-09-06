@@ -111,6 +111,32 @@ func TestOpenPRRosterUpsertsAndReconciles(t *testing.T) {
 	}
 }
 
+func TestBackfillDetailsRewritesOnlyMatchingTokens(t *testing.T) {
+	s := testStore(t)
+	raw := ev("raw", "t1", true)
+	raw.Detail = "author"
+	kept := ev("kept", "t2", true)
+	kept.Detail = "new comment"
+	if err := s.UpsertAll([]timeline.Event{raw, kept}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.BackfillDetails(map[string]string{"author": "activity on your PR"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.List()
+	by := map[string]string{}
+	for _, e := range got {
+		by[e.ID] = e.Detail
+	}
+	if by["raw"] != "activity on your PR" {
+		t.Errorf("raw token not rewritten: %q", by["raw"])
+	}
+	if by["kept"] != "new comment" {
+		t.Errorf("non-matching detail was touched: %q", by["kept"])
+	}
+}
+
 func TestPruneKeepsUnreadRemovesOldRead(t *testing.T) {
 	s := testStore(t)
 	s.Upsert(ev("keep", "t1", true))  // unread -> must survive

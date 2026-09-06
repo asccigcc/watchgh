@@ -35,6 +35,28 @@ func FromNotification(n github.Notification, s github.Subject, viewer string) ti
 	}
 }
 
+// leakyReasons are the GitHub notification reasons the classifier used to echo
+// verbatim as the row detail (they fell through to the old default case). Any
+// stored event whose detail equals one of these is a pre-fix leak.
+var leakyReasons = []string{
+	"author", "manual", "ci_activity", "subscribed", "approval_requested",
+	"invitation", "security_alert", "security_advisory_credit",
+	"member_feature_requested", "your_activity",
+}
+
+// DetailBackfill maps each leaked raw-reason token to the phrase classify now
+// produces, for a one-time store cleanup. classify stays the single source of
+// truth: tokens whose detail is unchanged (none, post-fix) are skipped.
+func DetailBackfill() map[string]string {
+	m := make(map[string]string, len(leakyReasons))
+	for _, r := range leakyReasons {
+		if _, detail, _ := classify(r); detail != r {
+			m[r] = detail
+		}
+	}
+	return m
+}
+
 // classify turns a notification `reason` into (kind, detail, actionable).
 // Path-A (notification-backed) subset only; CI/blocked come from GraphQL later.
 func classify(reason string) (timeline.Kind, string, bool) {

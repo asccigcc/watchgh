@@ -434,6 +434,7 @@ func setup(ctx context.Context) (*github.Client, *store.Store, string, error) {
 	if err != nil {
 		return nil, nil, "", err
 	}
+	_ = st.BackfillDetails(ingest.DetailBackfill()) // one-off cleanup of pre-fix rows
 	viewer, err := c.Viewer(ctx)
 	if err != nil {
 		st.Close()

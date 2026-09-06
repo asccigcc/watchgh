@@ -35,6 +35,19 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestDetailBackfillMapsLeakedReasons(t *testing.T) {
+	m := DetailBackfill()
+	if got := m["author"]; got != "activity on your PR" {
+		t.Errorf("author -> %q, want the mapped phrase", got)
+	}
+	// Every entry must translate the token, never echo it back.
+	for from, to := range m {
+		if from == to {
+			t.Errorf("backfill for %q still leaks the raw token", from)
+		}
+	}
+}
+
 func TestFromNotificationMinePII(t *testing.T) {
 	var n github.Notification
 	n.ID = "1"
