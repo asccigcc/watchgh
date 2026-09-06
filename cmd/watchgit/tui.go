@@ -466,7 +466,7 @@ func (t *tui) footer() string {
 // plain on the grey highlight background across the full width; others reuse the
 // colored CLI renderer.
 func (t *tui) rowText(e timeline.Event, selected bool) string {
-	o := timeline.RenderOpts{Now: time.Now(), StaleAfter: cfg.StaleAfter, Color: !selected, HideSeq: true}
+	o := timeline.RenderOpts{Now: time.Now(), StaleAfter: cfg.StaleAfter, Color: !selected, LeadWithPR: true}
 	row := timeline.RenderRow(e, o)
 	if selected {
 		return stySelect + padANSI(row, t.cols) + reset

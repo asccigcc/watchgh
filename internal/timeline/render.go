@@ -29,7 +29,7 @@ const defaultStaleAfter = 24 * time.Hour
 type RenderOpts struct {
 	Color      bool          // emit ANSI colors
 	Hyperlinks bool          // emit OSC 8 hyperlinks (else append a raw URL)
-	HideSeq    bool          // drop the leading seq column (TUI navigates by selection, not number)
+	LeadWithPR bool          // lead with the PR number + bare repo name (TUI) instead of seq + repo#num (list, which opens by seq)
 	Now        time.Time     // reference time for relative timestamps
 	StaleAfter time.Duration // DUE threshold; zero falls back to defaultStaleAfter
 }
@@ -59,11 +59,17 @@ func Render(events []Event, o RenderOpts) string {
 func RenderRow(e Event, o RenderOpts) string { return renderRow(e, o) }
 
 func renderRow(e Event, o RenderOpts) string {
-	// SEQ (stable local number for `watchgit open N`), dim, right-aligned in 4.
-	// The TUI hides it — it opens the selected row, so the number is just noise.
-	seq := ""
-	if !o.HideSeq {
-		seq = colorize(padLeft(fmt.Sprintf("%d", e.Seq), 4), colDim, o.Color) + " "
+	// LEAD number, dim, right-aligned: the PR number for the TUI (which opens the
+	// selected row, so the seq is noise) or the seq for `list` (the open handle).
+	var lead string
+	if o.LeadWithPR {
+		ref := ""
+		if e.Number > 0 {
+			ref = fmt.Sprintf("#%d", e.Number)
+		}
+		lead = colorize(padLeft(ref, 6), colDim, o.Color) + " "
+	} else {
+		lead = colorize(padLeft(fmt.Sprintf("%d", e.Seq), 4), colDim, o.Color) + " "
 	}
 
 	// GUTTER: your state — DUE (needs you, aging), NEW (unread), blank (read).
@@ -77,8 +83,13 @@ func renderRow(e Event, o RenderOpts) string {
 	badge := e.Kind.Badge()
 	badgeCell := colorize(padRight(badge.Glyph+" "+badge.Label, 8), badge.Color, o.Color)
 
-	// REPO#NUM (OSC 8 link to the PR), padded to 18; #num always preserved.
-	refText := refLabel(e.Repo, e.Number, 18)
+	// REPO (OSC 8 link to the PR), padded to 18. The TUI shows just the project —
+	// the PR number already leads the row — while `list` keeps repo#num.
+	refNum := e.Number
+	if o.LeadWithPR {
+		refNum = 0
+	}
+	refText := refLabel(e.Repo, refNum, 18)
 	ref := hyperlink(e.URL, refText, o) + strings.Repeat(" ", pad(refText, 18))
 
 	// AUTHOR, padded to 11; dim em-dash when it's the viewer's own PR.
@@ -92,7 +103,7 @@ func renderRow(e Event, o RenderOpts) string {
 	author := colorizeIf(e.IsMine, padRight(authorText, 11), colDim, o.Color)
 
 	row := fmt.Sprintf("%s%s %s  %s  %s  %s  %s",
-		seq, gutter, age, badgeCell, ref, author, e.Detail)
+		lead, gutter, age, badgeCell, ref, author, e.Detail)
 
 	// Read/history rows dim as a freshness cue.
 	if !e.Unread && o.Color {
