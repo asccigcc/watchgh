@@ -18,12 +18,19 @@ func TestClassify(t *testing.T) {
 		{"assign", timeline.KindAssigned, true},
 		{"comment", timeline.KindCommented, false},
 		{"mention", timeline.KindCommented, true},
+		{"author", timeline.KindOther, false},
+		{"manual", timeline.KindOther, false},
+		{"ci_activity", timeline.KindOther, false},
 		{"subscribed", timeline.KindOther, false},
 	}
 	for _, c := range cases {
-		k, _, a := classify(c.reason)
+		k, detail, a := classify(c.reason)
 		if k != c.kind || a != c.actionable {
 			t.Errorf("classify(%q) = (%v,%v), want (%v,%v)", c.reason, k, a, c.kind, c.actionable)
+		}
+		// The detail must be a human phrase, never the raw reason token.
+		if detail == c.reason {
+			t.Errorf("classify(%q) leaked the raw reason as detail %q", c.reason, detail)
 		}
 	}
 }

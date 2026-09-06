@@ -49,7 +49,16 @@ func classify(reason string) (timeline.Kind, string, bool) {
 		return timeline.KindCommented, "mentioned you", true
 	case "state_change":
 		return timeline.KindStateChange, "state changed", false
+	case "author":
+		// You created the thread; GitHub fired the coarse "author" reason for
+		// some activity it didn't classify further.
+		return timeline.KindOther, "activity on your PR", false
+	case "manual":
+		return timeline.KindOther, "activity on a thread you follow", false
+	case "ci_activity":
+		return timeline.KindOther, "workflow run finished", false
 	default:
-		return timeline.KindOther, reason, false
+		// Never surface the raw reason token; a readable phrase beats "author".
+		return timeline.KindOther, "new activity", false
 	}
 }
