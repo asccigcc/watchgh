@@ -50,7 +50,9 @@ func renderRow(e Event, o RenderOpts) string {
 	// SEQ (stable local number for `watchgit open N`), dim, right-aligned in 4.
 	seq := colorize(padLeft(fmt.Sprintf("%d", e.Seq), 4), colDim, o.Color)
 
-	gutter := gutterMark(e, o.Now)
+	// GUTTER: your state — DUE (needs you, aging), NEW (unread), blank (read).
+	label, gcolor := gutterMark(e, o.Now)
+	gutter := colorize(padRight(label, 3), gcolor, o.Color)
 
 	// TIME (relative, right-aligned in 5).
 	age := padLeft(relative(o.Now.Sub(e.TS)), 5)
@@ -87,15 +89,16 @@ func renderRow(e Event, o RenderOpts) string {
 	return row
 }
 
-// gutterMark returns the one-rune gutter: "!" stale-actionable, "▍" unread, else space.
-func gutterMark(e Event, now time.Time) string {
+// gutterMark returns the gutter tag and its color for an event's state:
+// "DUE" (unread, actionable, aging past staleAfter), "NEW" (unread), "" (read).
+func gutterMark(e Event, now time.Time) (string, color) {
 	if e.Unread && e.Actionable && now.Sub(e.TS) > staleAfter {
-		return "!"
+		return "DUE", colYellow
 	}
 	if e.Unread {
-		return "▍"
+		return "NEW", colBlue
 	}
-	return " "
+	return "", ""
 }
 
 func relative(d time.Duration) string {
