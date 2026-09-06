@@ -31,9 +31,15 @@ const (
 	cursorHome = "\x1b[H"
 	clearEOL   = "\x1b[K" // erase to end of line
 	clearEOS   = "\x1b[J" // erase to end of screen
-	reverse    = "\x1b[7m"
 	reset      = "\x1b[0m"
 	dimSeq     = "\x1b[2m"
+
+	// Three distinct bar styles (256-color bg + bright-white fg so they read on
+	// both light and dark terminals): the title/footer chrome, the selected
+	// row, and the active tab each get their own hue.
+	styChrome = "\x1b[48;5;24;97m"  // blue — title bar + footer status bar
+	stySelect = "\x1b[48;5;238;97m" // grey — the selected row
+	styTab    = "\x1b[48;5;53;97m"  // magenta — the active tab chip
 )
 
 // refreshTick is how often the viewer re-reads the store to pick up events the
@@ -417,9 +423,9 @@ func (t *tui) draw() {
 	fmt.Fprint(os.Stdout, b.String())
 }
 
-// titleBar is the app name, a full-width reverse-video bar across the top.
+// titleBar is the app name, a full-width blue bar across the top.
 func (t *tui) titleBar() string {
-	return reverse + padANSI(" ◆ watchgit — GitHub activity timeline", t.cols) + reset
+	return styChrome + padANSI(" ◆ watchgit — GitHub activity timeline", t.cols) + reset
 }
 
 // header draws the tab bar: the active tab reversed, each with its live count.
@@ -428,7 +434,7 @@ func (t *tui) header() string {
 	for i, d := range tabDefs {
 		seg := fmt.Sprintf(" %d %s %d ", i+1, d.name, t.count(i))
 		if i == t.active {
-			b.WriteString(reverse + seg + reset)
+			b.WriteString(styTab + seg + reset)
 		} else {
 			b.WriteString(dimSeq + seg + reset)
 		}
@@ -436,7 +442,7 @@ func (t *tui) header() string {
 	return truncateANSI(b.String(), t.cols)
 }
 
-// footer is a status bar: keybinds + position on a reverse-video background,
+// footer is a status bar: keybinds + position on the blue chrome background,
 // with the viewer login trailing plain (no background) at the right edge.
 func (t *tui) footer() string {
 	pos := ""
@@ -450,18 +456,18 @@ func (t *tui) footer() string {
 	if uw > t.cols {
 		uw = t.cols
 	}
-	bar := reverse + padANSI(status, t.cols-uw) + reset
+	bar := styChrome + padANSI(status, t.cols-uw) + reset
 	return bar + dimSeq + padANSI(user, uw) + reset
 }
 
 // rowText renders one timeline row to fit the width. The selected row is drawn
-// plain and reverse-video across the full width; others reuse the colored CLI
-// renderer, so the two surfaces stay pixel-identical.
+// plain on the grey highlight background across the full width; others reuse the
+// colored CLI renderer.
 func (t *tui) rowText(e timeline.Event, selected bool) string {
 	o := timeline.RenderOpts{Now: time.Now(), StaleAfter: cfg.StaleAfter, Color: !selected, HideSeq: true}
 	row := timeline.RenderRow(e, o)
 	if selected {
-		return reverse + padANSI(row, t.cols) + reset
+		return stySelect + padANSI(row, t.cols) + reset
 	}
 	return truncateANSI(row, t.cols)
 }
