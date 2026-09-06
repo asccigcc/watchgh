@@ -96,7 +96,7 @@ func menuItems() []menuet.MenuItem {
 		return append([]menuet.MenuItem{menuet.Regular{Text: "⚠ " + err.Error()}}, daemonItems()...)
 	}
 	// The menu is an inbox, not a history: show only what you haven't visited
-	// (new + still-unread-but-aging). Read items live in `wgh list`. This
+	// (new + still-unread-but-aging). Read items live in `wgh`. This
 	// also keeps the dropdown in step with the badge, which counts unread only.
 	var events []timeline.Event
 	for _, e := range all {
@@ -133,7 +133,7 @@ func menuItems() []menuet.MenuItem {
 	more := len(events) - len(shown)
 	if more > 0 {
 		items = append(items, menuet.Regular{
-			Text:  fmt.Sprintf("…%d more — run `wgh list`", more),
+			Text:  fmt.Sprintf("…%d more — run `wgh`", more),
 			Color: menuet.LabelTertiary,
 		})
 	}

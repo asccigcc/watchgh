@@ -1,6 +1,6 @@
 // Command wgh shows GitHub activity you care about as an arrival-ordered
 // timeline: notifications (reviews/assigns/comments) plus tracked-PR CI and
-// merge-state transitions, with a live watch mode and desktop notifications.
+// merge-state transitions, with desktop notifications from a background daemon.
 package main
 
 import (
@@ -51,16 +51,13 @@ func main() {
 	switch cmd {
 	case "":
 		// Bare `wgh` opens the interactive timeline when attached to a
-		// terminal; piped or redirected, it prints like `list` so scripts work.
+		// terminal; piped or redirected, it prints the plain timeline so
+		// scripts keep working.
 		if isTerminal(os.Stdout) && isTerminal(os.Stdin) {
 			err = runTUI(ctx)
 		} else {
 			err = runList(ctx)
 		}
-	case "list":
-		err = runList(ctx)
-	case "watch":
-		err = runWatch(ctx)
 	case "daemon":
 		err = runDaemon(ctx, args)
 	case "open":
@@ -84,16 +81,14 @@ func usage() {
 	fmt.Println(`wgh — a GitHub activity timeline
 
 Usage:
-  wgh               Interactive timeline (arrows/⏎/r/q); prints like list when piped
-  wgh list          Print the stored timeline (polls once first)
-  wgh watch         Stream new events live with desktop notifications
+  wgh               Interactive timeline (arrows/⏎/r/q); prints plain when piped
   wgh open <n>      Open item <n> in the browser and mark it read (here + GitHub)
   wgh read <n>      Mark item <n> read without opening
   wgh daemon <cmd>  Background poller: install | uninstall | status
   wgh help          Show this help
 
 The daemon runs the poll loop continuously via launchd, so desktop
-notifications fire even with no terminal open; list/watch just read the store.`)
+notifications fire even with no terminal open; the timeline just reads the store.`)
 }
 
 func runList(ctx context.Context) error {
@@ -127,31 +122,6 @@ func runList(ctx context.Context) error {
 	}
 	fmt.Print(out)
 	return nil
-}
-
-func runWatch(ctx context.Context) error {
-	c, st, viewer, err := setup(ctx)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-
-	w := newWatcher(c, st, viewer, func(m string) { fmt.Fprintln(os.Stderr, dim("⚠ "+m)) })
-	fmt.Print(timeline.Render(w.baseline(ctx), renderOpts()))
-	fmt.Println(dim("— watching, Ctrl+C to stop —"))
-
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println(dim("— stopped —"))
-			return nil
-		case <-time.After(w.interval):
-		}
-		if fresh := w.tick(ctx); len(fresh) > 0 {
-			fmt.Print(timeline.Render(fresh, renderOpts()))
-			notifyActionable(fresh)
-		}
-	}
 }
 
 // runDaemon dispatches the `daemon` subcommands. `run` is the headless poll loop
@@ -221,7 +191,7 @@ func runDaemonLoop(ctx context.Context) error {
 	}
 }
 
-// watcher holds the poll-loop state shared by `watch` and the daemon.
+// watcher holds the poll-loop state the daemon runs on.
 type watcher struct {
 	c            *github.Client
 	st           *store.Store

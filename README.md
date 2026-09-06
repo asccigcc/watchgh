@@ -10,12 +10,12 @@ timeline, live or on demand, and can run as an always-on background daemon.
 
 - [x] **1. list** — `GET /notifications`, enriched, rendered as timeline rows
 - [x] **2. store** — SQLite persistence, dedupe, read/unread, retention pruning
-- [x] **3. watch** — poll loop (conditional GET, honors `X-Poll-Interval`) +
+- [x] **3. poll loop** — conditional GET (honors `X-Poll-Interval`) +
       macOS desktop notifications for actionable events
 - [x] **4. tracked PRs** — GraphQL diff engine emitting CI-finished and
       blocked/unblocked events on state transitions (open + assigned PRs)
 - [x] **5. daemon** — launchd LaunchAgent runs the poll loop continuously;
-      notifications fire with no terminal open, and list/watch just read the store
+      notifications fire with no terminal open, and the timeline just reads the store
 - [x] **6. menu bar** — a macOS status-bar app (`wgh-menu`) that reads the
       store, shows the timeline with an unread badge, and opens items via the CLI
 
@@ -42,9 +42,7 @@ WGH_NO_MENU=1 bash install.sh   # CLI/daemon only
 ## Usage
 
 ```sh
-wgh                  # interactive full-screen timeline (falls back to list when piped)
-wgh list             # print the stored timeline and exit
-wgh watch            # stream new events live + desktop notifications
+wgh                  # interactive full-screen timeline (prints plain when piped)
 wgh open 42          # open item 42 in browser, mark read (here + GitHub)
 wgh read 42          # mark item 42 read without opening
 
@@ -82,7 +80,7 @@ It's organized into four tabs (the counts update live):
 
 It's a pure viewer over the store — the daemon (or a one-shot sync at launch)
 fills it — and it re-reads every couple of seconds, so events the daemon collects
-appear live. Piped or redirected (`wgh | less`), it prints like `list` so
+appear live. Piped or redirected (`wgh | less`), it prints the plain timeline so
 scripts keep working.
 
 ## Background daemon
@@ -94,11 +92,9 @@ session — that's what lets it post desktop notifications. It starts immediatel
 restarts at login, and `KeepAlive` respawns it if it dies. It writes a timestamped
 event log to `~/Library/Logs/watchgh.log`.
 
-Because the daemon polls into the same SQLite store, `list` just reads what the
+Because the daemon polls into the same SQLite store, `wgh` just reads what the
 daemon has already collected — no polling on your part. The store runs in WAL
-mode so the CLI can read while the daemon writes. You can still run
-`wgh watch` alongside it; whichever process sees an event first records it,
-so you won't get duplicate notifications.
+mode so the CLI can read while the daemon writes.
 
 ## Menu-bar app
 
@@ -110,7 +106,7 @@ place. The menu-bar title shows the unread count (`◆ 3`); the dropdown lists t
 **unread** events (newest first) with their colored badge and a NEW/DUE pill —
 an inbox of what still needs you, not a history — and clicking a row opens it
 (marking it read here and on GitHub, which drops it from the dropdown). The full
-timeline, read items included, stays in `wgh list`.
+timeline, read items included, stays in `wgh`.
 
 The dropdown also shows the background daemon's health at the bottom — `Daemon:
 running ✓` when the poller is alive, or `Daemon: not running` with a **Start
@@ -128,8 +124,8 @@ pure-Go, cgo-free CLI/daemon — it's built and installed separately (via the
 `Makefile`, into `~/Applications/wgh-menu.app`). Toggle **Start at Login**
 from the app's own menu to keep it running across reboots.
 
-`watch` polls on GitHub's requested interval using conditional requests (a
-304 "nothing changed" costs no rate limit), streams only newly-arrived events,
+The poll loop uses GitHub's requested interval with conditional requests (a
+304 "nothing changed" costs no rate limit), records only newly-arrived events,
 and fires a desktop notification for **actionable** ones only (review requested,
 assigned, changes requested, CI failed). Notifications open the PR on click when
 [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) is

@@ -60,7 +60,7 @@ func RenderRow(e Event, o RenderOpts) string { return renderRow(e, o) }
 
 func renderRow(e Event, o RenderOpts) string {
 	// LEAD number, dim, right-aligned: the PR number for the TUI (which opens the
-	// selected row, so the seq is noise) or the seq for `list` (the open handle).
+	// selected row, so the seq is noise) or the seq for plain output (the open handle).
 	var lead string
 	if o.LeadWithPR {
 		ref := ""
@@ -84,7 +84,7 @@ func renderRow(e Event, o RenderOpts) string {
 	badgeCell := colorize(padRight(badge.Glyph+" "+badge.Label, 8), badge.Color, o.Color)
 
 	// REPO (OSC 8 link to the PR), padded to 18. The TUI shows just the project —
-	// the PR number already leads the row — while `list` keeps repo#num.
+	// the PR number already leads the row — while plain output keeps repo#num.
 	refNum := e.Number
 	if o.LeadWithPR {
 		refNum = 0
