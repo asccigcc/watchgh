@@ -172,6 +172,15 @@ FROM events ORDER BY ts ASC`)
 	return out, rows.Err()
 }
 
+// UnreadCount returns how many events are effectively unread (not locally read
+// and still unread on GitHub) — used for the menu-bar badge.
+func (s *Store) UnreadCount() (int, error) {
+	var n int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM events WHERE read_at IS NULL AND github_unread=1`).Scan(&n)
+	return n, err
+}
+
 // Get returns a single event by its local seq.
 func (s *Store) Get(seq int64) (timeline.Event, error) {
 	return s.scanOne(`

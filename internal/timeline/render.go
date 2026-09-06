@@ -101,6 +101,10 @@ func gutterMark(e Event, now time.Time) (string, color) {
 	return "", ""
 }
 
+// Relative renders a compact human age ("now", "5m", "3h", "2d") for reuse
+// outside the timeline renderer (e.g. the menu-bar app).
+func Relative(d time.Duration) string { return relative(d) }
+
 func relative(d time.Duration) string {
 	switch {
 	case d < time.Minute:

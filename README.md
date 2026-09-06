@@ -16,6 +16,8 @@ timeline, live or on demand, and can run as an always-on background daemon.
       blocked/unblocked events on state transitions (open + assigned PRs)
 - [x] **5. daemon** — launchd LaunchAgent runs the poll loop continuously;
       notifications fire with no terminal open, and list/watch just read the store
+- [x] **6. menu bar** — a macOS status-bar app (`watchgit-menu`) that reads the
+      store, shows the timeline with an unread badge, and opens items via the CLI
 
 ## Usage
 
@@ -44,6 +46,26 @@ daemon has already collected — no polling on your part. The store runs in WAL
 mode so the CLI can read while the daemon writes. You can still run
 `watchgit watch` alongside it; whichever process sees an event first records it,
 so you won't get duplicate notifications.
+
+## Menu-bar app
+
+`watchgit-menu` is a macOS status-bar viewer built on
+[menuet](https://github.com/caseymrm/menuet). It's a **pure viewer**: it reads
+the same store the daemon fills (never polls GitHub itself) and delegates
+open/mark-read to the `watchgit` CLI, so the GitHub-sync logic lives in one
+place. The menu-bar title shows the unread count (`◆ 3`); the dropdown lists the
+newest events with their colored badge and a NEW/DUE pill, and clicking a row
+opens it (marking it read here and on GitHub).
+
+```sh
+make menu            # build the .app bundle and launch it (look for ◆)
+make menu-uninstall  # quit and remove the bundle
+```
+
+menuet needs cgo and must run from inside a `.app` bundle, so — unlike the
+pure-Go, cgo-free CLI/daemon — it's built and installed separately (via the
+`Makefile`, into `~/Applications/watchgit-menu.app`). Toggle **Start at Login**
+from the app's own menu to keep it running across reboots.
 
 `watch` polls on GitHub's requested interval using conditional requests (a
 304 "nothing changed" costs no rate limit), streams only newly-arrived events,

@@ -2,9 +2,13 @@ module watchgit
 
 go 1.27
 
-require modernc.org/sqlite v1.58.0
+require (
+	github.com/caseymrm/menuet/v2 v2.16.0
+	modernc.org/sqlite v1.58.0
+)
 
 require (
+	github.com/caseymrm/askm v1.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
