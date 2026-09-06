@@ -102,12 +102,12 @@ func menuItems() []menuet.MenuItem {
 
 	now := time.Now()
 	var items []menuet.MenuItem
-	seqs := make([]int64, 0, len(events)) // every unread seq, for "open all"
+	shown := make([]int64, 0, maxRows) // only the visible rows' seqs
 	for i, e := range events {
-		seqs = append(seqs, e.Seq)
 		if i >= maxRows {
-			continue // keep collecting seqs, but stop adding rows
+			break
 		}
+		shown = append(shown, e.Seq)
 		seq := e.Seq
 		items = append(items, menuet.Regular{
 			Runs:     rowRuns(e, now),
@@ -116,18 +116,24 @@ func menuItems() []menuet.MenuItem {
 		})
 	}
 
-	if more := len(events) - maxRows; more > 0 {
+	// Open only the visible batch, not all N: opening them marks them read, they
+	// drop off, and the next batch surfaces on the next open — so a big backlog
+	// pages through 5 at a time instead of spawning dozens of browser tabs.
+	more := len(events) - len(shown)
+	if more > 0 {
 		items = append(items, menuet.Regular{
 			Text:  fmt.Sprintf("…%d more — run `watchgit list`", more),
 			Color: menuet.LabelTertiary,
 		})
 	}
+	label := fmt.Sprintf("Open all (%d)", len(shown))
+	if more > 0 {
+		label = fmt.Sprintf("Open next %d", len(shown))
+	}
+	batch := shown
 	items = append(items,
 		menuet.Separator{},
-		menuet.Regular{
-			Text:    fmt.Sprintf("Open all unread (%d)", len(seqs)),
-			Clicked: func() { openAll(seqs) },
-		})
+		menuet.Regular{Text: label, Clicked: func() { openAll(batch) }})
 	return append(items, daemonItems()...)
 }
 
