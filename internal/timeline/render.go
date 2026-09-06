@@ -21,15 +21,16 @@ const (
 	colMagenta color = "\x1b[35m"
 )
 
-// staleAfter is how long an unread, actionable item may sit before it earns
-// the "!" gutter marker. Config-overridable later.
-const staleAfter = 24 * time.Hour
+// defaultStaleAfter is how long an unread, actionable item may sit before it
+// earns the DUE marker, used when RenderOpts leaves StaleAfter unset.
+const defaultStaleAfter = 24 * time.Hour
 
 // RenderOpts controls output for a given terminal/pipe.
 type RenderOpts struct {
-	Color      bool      // emit ANSI colors
-	Hyperlinks bool      // emit OSC 8 hyperlinks (else append a raw URL)
-	Now        time.Time // reference time for relative timestamps
+	Color      bool          // emit ANSI colors
+	Hyperlinks bool          // emit OSC 8 hyperlinks (else append a raw URL)
+	Now        time.Time     // reference time for relative timestamps
+	StaleAfter time.Duration // DUE threshold; zero falls back to defaultStaleAfter
 }
 
 // Render sorts events oldest-first (newest at the bottom, log-style) and
@@ -51,7 +52,7 @@ func renderRow(e Event, o RenderOpts) string {
 	seq := colorize(padLeft(fmt.Sprintf("%d", e.Seq), 4), colDim, o.Color)
 
 	// GUTTER: your state — DUE (needs you, aging), NEW (unread), blank (read).
-	label, gcolor := gutterMark(e, o.Now)
+	label, gcolor := gutterMark(e, o.Now, o.staleAfter())
 	gutter := colorize(padRight(label, 3), gcolor, o.Color)
 
 	// TIME (relative, right-aligned in 5).
@@ -89,9 +90,17 @@ func renderRow(e Event, o RenderOpts) string {
 	return row
 }
 
+// staleAfter resolves the DUE threshold, defaulting when the caller left it unset.
+func (o RenderOpts) staleAfter() time.Duration {
+	if o.StaleAfter > 0 {
+		return o.StaleAfter
+	}
+	return defaultStaleAfter
+}
+
 // gutterMark returns the gutter tag and its color for an event's state:
 // "DUE" (unread, actionable, aging past staleAfter), "NEW" (unread), "" (read).
-func gutterMark(e Event, now time.Time) (string, color) {
+func gutterMark(e Event, now time.Time, staleAfter time.Duration) (string, color) {
 	if e.Unread && e.Actionable && now.Sub(e.TS) > staleAfter {
 		return "DUE", colYellow
 	}

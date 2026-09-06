@@ -52,15 +52,15 @@ func TestRelative(t *testing.T) {
 func TestGutterMark(t *testing.T) {
 	now := time.Now()
 	old := Event{Unread: true, Actionable: true, TS: now.Add(-48 * time.Hour)}
-	if got, _ := gutterMark(old, now); got != "DUE" {
+	if got, _ := gutterMark(old, now, defaultStaleAfter); got != "DUE" {
 		t.Errorf("stale actionable gutter = %q, want DUE", got)
 	}
 	fresh := Event{Unread: true, Actionable: true, TS: now.Add(-1 * time.Hour)}
-	if got, _ := gutterMark(fresh, now); got != "NEW" {
+	if got, _ := gutterMark(fresh, now, defaultStaleAfter); got != "NEW" {
 		t.Errorf("fresh unread gutter = %q, want NEW", got)
 	}
 	read := Event{Unread: false, TS: now.Add(-48 * time.Hour)}
-	if got, _ := gutterMark(read, now); got != "" {
+	if got, _ := gutterMark(read, now, defaultStaleAfter); got != "" {
 		t.Errorf("read gutter = %q, want empty", got)
 	}
 }

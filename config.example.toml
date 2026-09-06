@@ -1,0 +1,25 @@
+# watchgit configuration (all keys optional; shown values are the defaults).
+#
+# Copy to your config directory to override:
+#   macOS:  ~/Library/Application Support/watchgit/config.toml
+#   Linux:  ~/.config/watchgit/config.toml
+#
+# Durations accept Go units (s, m, h) plus a day unit (d), e.g. "90s", "36h", "7d".
+# A missing file — or any missing key — keeps the default below.
+
+# How long an unread, actionable item may sit before it earns the DUE marker
+# (in the CLI gutter and the menu-bar pill).
+stale_after = "24h"
+
+# Read/resolved events older than this are pruned; unread items are never removed.
+retention = "7d"
+
+# Minimum spacing between polls, even if GitHub's X-Poll-Interval is lower.
+poll_floor = "60s"
+
+# Max rows shown in the menu-bar dropdown before the "…N more" overflow line.
+menu_rows = 5
+
+# Desktop-notify only actionable events (review requested, assigned, changes
+# requested, CI failed). Set false to be notified about every new event.
+actionable_only_notify = true

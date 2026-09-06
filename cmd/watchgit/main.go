@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"watchgit/internal/config"
 	"watchgit/internal/daemon"
 	"watchgit/internal/github"
 	"watchgit/internal/ingest"
@@ -24,11 +25,9 @@ import (
 	"watchgit/internal/tracker"
 )
 
-const (
-	pruneAfter  = 7 * 24 * time.Hour
-	pollFloor   = 60 * time.Second
-	pollDefault = 60 * time.Second
-)
+// cfg holds the user-tunable thresholds, loaded once at startup. Every field
+// has a default, so a missing config file is fine.
+var cfg = config.Defaults()
 
 func main() {
 	args := os.Args[1:]
@@ -36,6 +35,12 @@ func main() {
 	if len(args) > 0 {
 		cmd = args[0]
 		args = args[1:]
+	}
+
+	if c, err := config.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "watchgit: config:", err, "— using defaults")
+	} else {
+		cfg = c
 	}
 
 	// SIGTERM as well as SIGINT: launchd stops the daemon with SIGTERM on unload.
@@ -95,7 +100,7 @@ func runList(ctx context.Context) error {
 	if _, err := syncTracked(ctx, c, st, viewer); err != nil {
 		fmt.Fprintln(os.Stderr, dim("⚠ tracked-PR poll failed: "+err.Error()))
 	}
-	if err := st.Prune(pruneAfter); err != nil {
+	if err := st.Prune(cfg.Retention); err != nil {
 		return fmt.Errorf("pruning: %w", err)
 	}
 
@@ -215,7 +220,7 @@ type watcher struct {
 }
 
 func newWatcher(c *github.Client, st *store.Store, viewer string, warn func(string)) *watcher {
-	return &watcher{c: c, st: st, viewer: viewer, interval: pollDefault, warn: warn}
+	return &watcher{c: c, st: st, viewer: viewer, interval: cfg.PollFloor, warn: warn}
 }
 
 // baseline runs the initial silent sync (seeding tracked-PR state without
@@ -223,7 +228,7 @@ func newWatcher(c *github.Client, st *store.Store, viewer string, warn func(stri
 func (w *watcher) baseline(ctx context.Context) []timeline.Event {
 	syncNotifications(ctx, w.c, w.st, w.viewer)
 	syncTracked(ctx, w.c, w.st, w.viewer)
-	w.st.Prune(pruneAfter)
+	w.st.Prune(cfg.Retention)
 	stored, _ := w.st.List()
 	return stored
 }
@@ -240,7 +245,7 @@ func (w *watcher) tick(ctx context.Context) []timeline.Event {
 		}
 	} else {
 		if poll > 0 {
-			w.interval = max(poll, pollFloor)
+			w.interval = max(poll, cfg.PollFloor)
 		}
 		if changed {
 			w.lastModified = lm
@@ -259,7 +264,7 @@ func (w *watcher) tick(ctx context.Context) []timeline.Event {
 		w.warn("tracked-PR poll failed: " + err.Error())
 	}
 
-	w.st.Prune(pruneAfter)
+	w.st.Prune(cfg.Retention)
 	return fresh
 }
 
@@ -330,10 +335,12 @@ func persist(st *store.Store, events []timeline.Event) ([]timeline.Event, error)
 	return fresh, nil
 }
 
-// notifyActionable fires one desktop notification per new actionable event.
+// notifyActionable fires one desktop notification per new event. By default it
+// only notifies actionable events; setting actionable_only_notify = false in the
+// config makes it notify every fresh event.
 func notifyActionable(events []timeline.Event) {
 	for _, e := range events {
-		if !e.Actionable {
+		if cfg.NotifyActionableOnly && !e.Actionable {
 			continue
 		}
 		badge := e.Kind.Badge()
@@ -414,6 +421,7 @@ func renderOpts() timeline.RenderOpts {
 		Color:      tty && os.Getenv("NO_COLOR") == "",
 		Hyperlinks: tty,
 		Now:        time.Now(),
+		StaleAfter: cfg.StaleAfter,
 	}
 }
 

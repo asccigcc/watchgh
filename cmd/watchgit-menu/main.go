@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"watchgit/internal/config"
 	"watchgit/internal/daemon"
 	"watchgit/internal/store"
 	"watchgit/internal/timeline"
@@ -22,15 +23,17 @@ import (
 )
 
 const (
-	maxRows    = 5              // cap on dropdown rows so the menu stays glanceable
-	staleAfter = 24 * time.Hour // unread + actionable past this earns a "DUE" pill
-	badgeTick  = 5 * time.Second
-	iconName   = "menubar" // template PNG in the bundle's Resources
+	badgeTick = 5 * time.Second
+	iconName  = "menubar" // template PNG in the bundle's Resources
 )
 
 // st is the shared read handle on the store; WAL mode lets it read while the
 // daemon writes, and SetMaxOpenConns(1) serializes our own concurrent reads.
 var st *store.Store
+
+// cfg holds the same user thresholds the CLI reads — menu row cap and the DUE
+// staleness window — so both surfaces agree. Every field has a default.
+var cfg = config.Defaults()
 
 func main() {
 	path, err := store.DefaultPath()
@@ -44,6 +47,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer st.Close()
+
+	if c, err := config.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "watchgit-menu: config:", err, "— using defaults")
+	} else {
+		cfg = c
+	}
 
 	go refreshBadge()
 
@@ -102,9 +111,9 @@ func menuItems() []menuet.MenuItem {
 
 	now := time.Now()
 	var items []menuet.MenuItem
-	shown := make([]int64, 0, maxRows) // only the visible rows' seqs
+	shown := make([]int64, 0, cfg.MenuRows) // only the visible rows' seqs
 	for i, e := range events {
-		if i >= maxRows {
+		if i >= cfg.MenuRows {
 			break
 		}
 		shown = append(shown, e.Seq)
@@ -179,7 +188,7 @@ func rowRuns(e timeline.Event, now time.Time) []menuet.TextRun {
 // statusPill mirrors the CLI gutter: DUE (unread, actionable, aging), NEW (unread).
 func statusPill(e timeline.Event, now time.Time) (string, menuet.Color, bool) {
 	switch {
-	case e.Unread && e.Actionable && now.Sub(e.TS) > staleAfter:
+	case e.Unread && e.Actionable && now.Sub(e.TS) > cfg.StaleAfter:
 		return "DUE", menuet.Yellow, true
 	case e.Unread:
 		return "NEW", menuet.Blue, true

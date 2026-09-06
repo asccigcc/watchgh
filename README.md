@@ -92,6 +92,17 @@ State lives in a SQLite DB under your OS config dir
 (`~/Library/Application Support/watchgit/watchgit.db` on macOS). Read/resolved
 items are pruned after 7 days; unread items are never auto-removed.
 
+## Configuration
+
+Thresholds are tunable via an optional `config.toml` in the same directory as
+the store (`~/Library/Application Support/watchgit/config.toml` on macOS). It's
+a flat `key = value` file; every key is optional and falls back to a default,
+and a malformed file just logs a warning and uses defaults. See
+[`config.example.toml`](config.example.toml) for the full list — the DUE
+staleness window, retention period, poll floor, menu row cap, and whether to
+notify on actionable events only. Durations take Go units plus a day unit
+(`"7d"`).
+
 Auth piggybacks on your existing credentials: `GITHUB_TOKEN` if set, otherwise
 `gh auth token`.
 
