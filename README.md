@@ -5,8 +5,8 @@ runs that need you, listed in the order they arrive.
 
 ## Status
 
-All four build steps done. watchgit polls notifications and tracked-PR CI/merge
-state into a persistent timeline, live or on demand.
+watchgit polls notifications and tracked-PR CI/merge state into a persistent
+timeline, live or on demand, and can run as an always-on background daemon.
 
 - [x] **1. list** — `GET /notifications`, enriched, rendered as timeline rows
 - [x] **2. store** — SQLite persistence, dedupe, read/unread, retention pruning
@@ -14,15 +14,36 @@ state into a persistent timeline, live or on demand.
       macOS desktop notifications for actionable events
 - [x] **4. tracked PRs** — GraphQL diff engine emitting CI-finished and
       blocked/unblocked events on state transitions (open + assigned PRs)
+- [x] **5. daemon** — launchd LaunchAgent runs the poll loop continuously;
+      notifications fire with no terminal open, and list/watch just read the store
 
 ## Usage
 
 ```sh
-go run ./cmd/watchgit list     # or just: watchgit — print the stored timeline
-go run ./cmd/watchgit watch    # stream new events live + desktop notifications
-go run ./cmd/watchgit open 42  # open item 42 in browser, mark read (here + GitHub)
-go run ./cmd/watchgit read 42  # mark item 42 read without opening
+watchgit list             # or just: watchgit — print the stored timeline
+watchgit watch            # stream new events live + desktop notifications
+watchgit open 42          # open item 42 in browser, mark read (here + GitHub)
+watchgit read 42          # mark item 42 read without opening
+
+watchgit daemon install   # run the poller in the background via launchd (starts now + at login)
+watchgit daemon status    # is it running? where are the plist and log?
+watchgit daemon uninstall # stop and remove it
 ```
+
+## Background daemon
+
+`watchgit daemon install` writes a per-user **LaunchAgent** to
+`~/Library/LaunchAgents/com.watchgit.plist` pointing at the installed binary and
+loads it. A LaunchAgent (not a system LaunchDaemon) runs inside your GUI login
+session — that's what lets it post desktop notifications. It starts immediately,
+restarts at login, and `KeepAlive` respawns it if it dies. It writes a timestamped
+event log to `~/Library/Logs/watchgit.log`.
+
+Because the daemon polls into the same SQLite store, `list` just reads what the
+daemon has already collected — no polling on your part. The store runs in WAL
+mode so the CLI can read while the daemon writes. You can still run
+`watchgit watch` alongside it; whichever process sees an event first records it,
+so you won't get duplicate notifications.
 
 `watch` polls on GitHub's requested interval using conditional requests (a
 304 "nothing changed" costs no rate limit), streams only newly-arrived events,
@@ -47,11 +68,12 @@ Auth piggybacks on your existing credentials: `GITHUB_TOKEN` if set, otherwise
 ## Reading a row
 
 ```
-GUTTER TIME  BADGE     REPO#NUM        AUTHOR    DETAIL
-!      2d    ◆ review  api#412         @kai      review requested
+SEQ GUT TIME  BADGE     REPO#NUM        AUTHOR    DETAIL
+  7 DUE   2d  ◆ review  api#412         @kai      review requested
 ```
 
-- **Gutter** — `!` needs you and has gone stale (>24h), `▍` unread, blank read.
+- **SEQ** — stable local number for `watchgit open <n>` / `read <n>`.
+- **Gutter** — `DUE` needs you and has gone stale (>24h), `NEW` unread, blank read.
 - **Badge** — colored by kind; red is reserved for CI failure.
 - **REPO#NUM** — Cmd+click opens the PR (OSC 8; falls back to a raw URL).
 - **AUTHOR** — the PR author; `—` when it's yours.
