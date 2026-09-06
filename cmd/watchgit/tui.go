@@ -61,13 +61,33 @@ type tui struct {
 	c      *github.Client
 	viewer string
 
-	events []timeline.Event
-	sel    int    // index of the selected row (0 = top = newest)
-	top    int    // index of the first visible row (scroll offset)
-	rows   int    // terminal height
-	cols   int    // terminal width
-	status string // footer message (last action, sync state, warnings)
+	all    []timeline.Event // every stored event, newest first (unfiltered)
+	events []timeline.Event // the active tab's filtered view
+	active int              // current tab index
+	pos    []int            // remembered selection index, per tab
+	sel    int              // index of the selected row (0 = top = newest)
+	top    int              // index of the first visible row (scroll offset)
+	rows   int              // terminal height
+	cols   int              // terminal width
+	status string           // footer message (last action, sync state, warnings)
 }
+
+// tabDefs are the timeline lenses, switched with 1-4 / Tab. Together they
+// partition the store: every unread item lands in exactly one of Inbox/Mine/CI
+// by (mine?, CI?), and Read collects everything already handled.
+var tabDefs = []struct {
+	name string
+	show func(timeline.Event) bool
+}{
+	{"Inbox", func(e timeline.Event) bool { return e.Unread && !e.IsMine && !isCI(e) }},
+	{"Read", func(e timeline.Event) bool { return !e.Unread }},
+	{"Mine", func(e timeline.Event) bool { return e.Unread && e.IsMine && !isCI(e) }},
+	{"CI", func(e timeline.Event) bool { return e.Unread && isCI(e) }},
+}
+
+// isCI marks the tracked-PR engine's events (CI status + blocked/clean), which
+// carry Source "graphql"; notification-backed items are the human activity.
+func isCI(e timeline.Event) bool { return e.Source == "graphql" }
 
 func (t *tui) run() error {
 	fd := int(os.Stdin.Fd())
@@ -80,9 +100,10 @@ func (t *tui) run() error {
 	fmt.Fprint(os.Stdout, altEnter+curHide)
 	defer fmt.Fprint(os.Stdout, curShow+altExit)
 
+	t.pos = make([]int, len(tabDefs))
 	t.resize()
 	t.reload()
-	t.status = "↑↓/jk move · g/G ends · ⏎ open · r read · R sync · q quit"
+	t.status = "1-4/⇥ tabs · ↑↓ move · ⏎ open · r read · R sync · q quit"
 	t.draw()
 
 	keys := make(chan keyEvent, 16)
@@ -146,8 +167,42 @@ func (t *tui) handle(k keyEvent, refreshed chan<- struct{}) bool {
 	case keySync:
 		t.status = "syncing…"
 		go t.sync(refreshed)
+	case keyTab1:
+		t.switchTab(0)
+	case keyTab2:
+		t.switchTab(1)
+	case keyTab3:
+		t.switchTab(2)
+	case keyTab4:
+		t.switchTab(3)
+	case keyTabNext:
+		t.cycleTab()
 	}
 	return false
+}
+
+// switchTab saves the current selection, activates tab i, and restores its own.
+func (t *tui) switchTab(i int) {
+	if i < 0 || i >= len(tabDefs) || i == t.active {
+		return
+	}
+	t.pos[t.active] = t.sel
+	t.active = i
+	t.sel = t.pos[i]
+	t.applyFilter()
+}
+
+func (t *tui) cycleTab() { t.switchTab((t.active + 1) % len(tabDefs)) }
+
+// count is how many stored events fall under tab i (for the tab-bar badges).
+func (t *tui) count(i int) int {
+	n := 0
+	for _, e := range t.all {
+		if tabDefs[i].show(e) {
+			n++
+		}
+	}
+	return n
 }
 
 func (t *tui) move(delta int) {
@@ -206,15 +261,32 @@ func (t *tui) reload() bool {
 	sort.SliceStable(stored, func(i, j int) bool {
 		return stored[i].TS.After(stored[j].TS)
 	})
-	before := signature(t.events)
-	t.events = stored
+	before := signature(t.all)
+	t.all = stored
+	t.applyFilter()
+	return before != signature(t.all)
+}
+
+// applyFilter recomputes the visible slice for the active tab and clamps sel.
+func (t *tui) applyFilter() {
+	show := tabDefs[t.active].show
+	view := make([]timeline.Event, 0, len(t.all))
+	for _, e := range t.all {
+		if show(e) {
+			view = append(view, e)
+		}
+	}
+	t.events = view
+	t.clampSel()
+}
+
+func (t *tui) clampSel() {
 	if t.sel >= len(t.events) {
 		t.sel = len(t.events) - 1
 	}
 	if t.sel < 0 {
 		t.sel = 0
 	}
-	return before != signature(t.events)
 }
 
 // signature is a cheap fingerprint of what's on screen: count, newest seq, and
@@ -262,7 +334,7 @@ func (t *tui) draw() {
 	b.WriteString(t.header() + clearEOL + "\r\n")
 
 	if len(t.events) == 0 {
-		b.WriteString("  ✓ all caught up" + clearEOL + "\r\n")
+		b.WriteString("  ✓ nothing in this tab" + clearEOL + "\r\n")
 		for i := 1; i < body; i++ {
 			b.WriteString(clearEOL + "\r\n")
 		}
@@ -281,9 +353,18 @@ func (t *tui) draw() {
 	fmt.Fprint(os.Stdout, b.String())
 }
 
+// header draws the tab bar: the active tab reversed, each with its live count.
 func (t *tui) header() string {
-	title := fmt.Sprintf(" watchgit · %d items · @%s", len(t.events), t.viewer)
-	return dimSeq + truncateANSI(title, t.cols) + reset
+	var b strings.Builder
+	for i, d := range tabDefs {
+		seg := fmt.Sprintf(" %d %s %d ", i+1, d.name, t.count(i))
+		if i == t.active {
+			b.WriteString(reverse + seg + reset)
+		} else {
+			b.WriteString(dimSeq + seg + reset)
+		}
+	}
+	return truncateANSI(b.String(), t.cols)
 }
 
 func (t *tui) footer() string {
@@ -291,7 +372,8 @@ func (t *tui) footer() string {
 	if len(t.events) > 0 {
 		pos = fmt.Sprintf(" [%d/%d]", t.sel+1, len(t.events))
 	}
-	return dimSeq + truncateANSI(" "+t.status+pos, t.cols) + reset
+	line := fmt.Sprintf(" %s%s · @%s", t.status, pos, t.viewer)
+	return dimSeq + truncateANSI(line, t.cols) + reset
 }
 
 // rowText renders one timeline row to fit the width. The selected row is drawn
@@ -360,6 +442,11 @@ const (
 	keyOpen
 	keyRead
 	keySync
+	keyTab1
+	keyTab2
+	keyTab3
+	keyTab4
+	keyTabNext
 	keyQuit
 )
 
@@ -394,6 +481,8 @@ func parseKeys(b []byte) []keyEvent {
 			out = append(out, keyEvent{keyOpen})
 		case c == 0x03: // Ctrl-C
 			out = append(out, keyEvent{keyQuit})
+		case c == '\t': // cycle to the next tab
+			out = append(out, keyEvent{keyTabNext})
 		default:
 			out = append(out, runeKey(rune(c)))
 		}
@@ -436,6 +525,14 @@ func runeKey(r rune) keyEvent {
 		return keyEvent{keySync}
 	case 'q':
 		return keyEvent{keyQuit}
+	case '1':
+		return keyEvent{keyTab1}
+	case '2':
+		return keyEvent{keyTab2}
+	case '3':
+		return keyEvent{keyTab3}
+	case '4':
+		return keyEvent{keyTab4}
 	default:
 		return keyEvent{keyNone}
 	}

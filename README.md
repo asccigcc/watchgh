@@ -38,8 +38,18 @@ watchgit daemon uninstall # stop and remove it
 Running `watchgit` with no arguments (attached to a terminal) opens a full-screen
 timeline on the alternate screen — the terminal counterpart to the menu-bar app:
 
+It's organized into four tabs (the counts update live):
+
+| Tab | Shows |
+| --- | ----- |
+| **1 · Inbox** (default) | unread items others put on you — review requests + assignments |
+| **2 · Read** | everything you've already handled (the archive) |
+| **3 · Mine** | unread activity on your own PRs — approvals, review comments |
+| **4 · CI** | unread build pass/fail + blocked/clean on your tracked PRs |
+
 | Key            | Action                                        |
 | -------------- | --------------------------------------------- |
+| `1`–`4`, `Tab` | switch tab (`Tab` cycles)                     |
 | `↑`/`↓`, `k`/`j` | move the selection                          |
 | `g` / `G`      | jump to the newest / oldest row               |
 | `PgUp`/`PgDn`  | page by a screenful                           |

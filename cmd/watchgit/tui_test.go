@@ -24,6 +24,9 @@ func TestParseKeys(t *testing.T) {
 		"q":      {keyQuit},
 		"\x1b":   {keyQuit}, // lone Escape
 		"\x03":   {keyQuit}, // Ctrl-C
+		"1":      {keyTab1},
+		"4":      {keyTab4},
+		"\t":     {keyTabNext},
 	}
 	for in, want := range cases {
 		got := parseKeys([]byte(in))
@@ -81,6 +84,35 @@ func TestPadANSI(t *testing.T) {
 	// Multi-byte glyphs count as one cell each.
 	if got := padANSI("◆x", 4); got != "◆x  " {
 		t.Errorf("padANSI multibyte = %q, want %q", got, "◆x  ")
+	}
+}
+
+func TestTabFilters(t *testing.T) {
+	// One representative event per category; each must land in exactly one tab.
+	evs := []timeline.Event{
+		{Unread: true, IsMine: false, Source: "notification"},  // 0 → Inbox
+		{Unread: false, IsMine: false, Source: "notification"}, // 1 → Read
+		{Unread: true, IsMine: true, Source: "notification"},   // 2 → Mine
+		{Unread: true, IsMine: true, Source: "graphql"},        // 3 → CI
+		{Unread: true, IsMine: false, Source: "graphql"},       // 4 → CI (assigned PR)
+		{Unread: false, IsMine: true, Source: "graphql"},       // 5 → Read (handled CI)
+	}
+	for i, e := range evs {
+		hits := 0
+		for _, d := range tabDefs {
+			if d.show(e) {
+				hits++
+			}
+		}
+		if hits != 1 {
+			t.Errorf("event %d matched %d tabs, want exactly 1", i, hits)
+		}
+	}
+	want := []int{0, 1, 2, 3, 3, 1} // expected tab index per event
+	for i, e := range evs {
+		if !tabDefs[want[i]].show(e) {
+			t.Errorf("event %d should be in tab %q", i, tabDefs[want[i]].name)
+		}
 	}
 }
 
