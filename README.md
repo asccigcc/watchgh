@@ -54,8 +54,10 @@ so you won't get duplicate notifications.
 the same store the daemon fills (never polls GitHub itself) and delegates
 open/mark-read to the `watchgit` CLI, so the GitHub-sync logic lives in one
 place. The menu-bar title shows the unread count (`◆ 3`); the dropdown lists the
-newest events with their colored badge and a NEW/DUE pill, and clicking a row
-opens it (marking it read here and on GitHub).
+**unread** events (newest first) with their colored badge and a NEW/DUE pill —
+an inbox of what still needs you, not a history — and clicking a row opens it
+(marking it read here and on GitHub, which drops it from the dropdown). The full
+timeline, read items included, stays in `watchgit list`.
 
 The dropdown also shows the background daemon's health at the bottom — `Daemon:
 running ✓` when the poller is alive, or `Daemon: not running` with a **Start
