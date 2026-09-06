@@ -19,6 +19,26 @@ timeline, live or on demand, and can run as an always-on background daemon.
 - [x] **6. menu bar** — a macOS status-bar app (`watchgit-menu`) that reads the
       store, shows the timeline with an unread badge, and opens items via the CLI
 
+## Install
+
+macOS only. Installs both pieces — the `watchgit` CLI/daemon and the
+`watchgit-menu` menu bar app — building from source (needs a Go toolchain and
+the Xcode command line tools):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgit/main/install.sh | bash
+```
+
+The CLI/daemon lands in `~/go/bin` and the app in `~/Applications`, then the
+menu bar app launches. Override with env vars, or skip the app for a headless
+box:
+
+```sh
+BINDIR=/usr/local/bin APPDIR=/Applications \
+  curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgit/main/install.sh | bash
+WATCHGIT_NO_MENU=1 bash install.sh   # CLI/daemon only
+```
+
 ## Usage
 
 ```sh
