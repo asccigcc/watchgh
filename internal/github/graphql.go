@@ -82,11 +82,11 @@ type searchResult struct {
 }
 
 type prNode struct {
-	Number     int    `json:"number"`
-	URL        string `json:"url"`
-	Title      string `json:"title"`
-	IsDraft    bool   `json:"isDraft"`
-	Author     struct {
+	Number  int    `json:"number"`
+	URL     string `json:"url"`
+	Title   string `json:"title"`
+	IsDraft bool   `json:"isDraft"`
+	Author  struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	Repository struct {

@@ -72,10 +72,10 @@ func TestParsePartialKeepsDefaults(t *testing.T) {
 
 func TestParseDurationDays(t *testing.T) {
 	cases := map[string]time.Duration{
-		"7d":   7 * 24 * time.Hour,
-		"1d":   24 * time.Hour,
-		"24h":  24 * time.Hour,
-		"90s":  90 * time.Second,
+		"7d":    7 * 24 * time.Hour,
+		"1d":    24 * time.Hour,
+		"24h":   24 * time.Hour,
+		"90s":   90 * time.Second,
 		"1h30m": 90 * time.Minute,
 	}
 	for in, want := range cases {
