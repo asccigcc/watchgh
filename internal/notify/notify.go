@@ -5,8 +5,8 @@
 package notify
 
 import (
-	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // Send posts a desktop notification. url is opened on click when supported.
@@ -19,6 +19,20 @@ func Send(title, message, url string) error {
 		}
 		return exec.Command(path, args...).Run()
 	}
-	script := fmt.Sprintf("display notification %q with title %q", message, title)
-	return exec.Command("osascript", "-e", script).Run()
+	return exec.Command("osascript", "-e", osaScript(title, message)).Run()
+}
+
+// osaScript builds the AppleScript for a notification, escaping title and
+// message as AppleScript string literals. Without escaping, a value containing a
+// double quote would break out of the literal and inject arbitrary AppleScript.
+func osaScript(title, message string) string {
+	return "display notification " + osaString(message) + " with title " + osaString(title)
+}
+
+// osaString renders s as a quoted AppleScript string literal. AppleScript only
+// understands \\ and \" as escapes (not Go's \x/\u forms), so we escape those
+// and fold newlines to spaces rather than emit a literal Go %q would produce.
+func osaString(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", " ", "\r", " ")
+	return `"` + r.Replace(s) + `"`
 }
