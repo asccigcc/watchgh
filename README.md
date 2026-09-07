@@ -1,38 +1,22 @@
 # watchgh
 
-A GitHub activity timeline for your terminal — the PRs, reviews, and CI runs
-that need you, listed in the order they arrive. The command is `wgh`.
-
-## Status
-
-watchgh polls notifications and tracked-PR CI/merge state into a persistent
-timeline, viewed in your terminal or the menu bar, with an always-on background
-daemon that does the polling and posts desktop notifications.
-
-- [x] **1. timeline** — `GET /notifications`, enriched, rendered as timeline rows
-- [x] **2. store** — SQLite persistence, dedupe, read/unread, retention pruning
-- [x] **3. poll loop** — conditional GET (honors `X-Poll-Interval`) +
-      macOS desktop notifications for actionable events
-- [x] **4. tracked PRs** — GraphQL diff engine emitting CI-finished and
-      blocked/unblocked events on state transitions (open + assigned PRs)
-- [x] **5. daemon** — launchd LaunchAgent runs the poll loop continuously;
-      notifications fire with no terminal open, and the timeline just reads the store
-- [x] **6. menu bar** — a macOS status-bar app (`wgh-menu`) that reads the
-      store, shows the timeline with an unread badge, and opens items via the CLI
+A GitHub activity timeline for your terminal: the PRs, reviews, and CI runs that
+need you, in the order they arrive. A background daemon polls GitHub and posts
+desktop notifications; `wgh` shows the timeline in your terminal or the macOS
+menu bar. Auth piggybacks on your credentials — `GITHUB_TOKEN` if set, otherwise
+`gh auth token`.
 
 ## Install
 
-macOS only. Installs both pieces — the `wgh` CLI/daemon and the
-`wgh-menu` menu bar app — building from source (needs a Go toolchain and
-the Xcode command line tools):
+macOS only. Builds from source (needs a Go toolchain and the Xcode command line
+tools) and installs both the `wgh` CLI/daemon and the `wgh-menu` menu bar app:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
 ```
 
-The CLI/daemon lands in `~/go/bin` and the app in `~/Applications`, then the
-menu bar app launches. Override with env vars, or skip the app for a headless
-box:
+The CLI/daemon lands in `~/go/bin`, the app in `~/Applications`. Override the
+paths, or skip the app on a headless box:
 
 ```sh
 BINDIR=/usr/local/bin APPDIR=/Applications \
@@ -40,137 +24,81 @@ BINDIR=/usr/local/bin APPDIR=/Applications \
 WGH_NO_MENU=1 bash install.sh   # CLI/daemon only
 ```
 
-## Usage
+## Commands
 
 ```sh
-wgh                  # interactive full-screen timeline (prints plain when piped)
-wgh open 42          # open item 42 in browser, mark read (here + GitHub)
+wgh                  # interactive timeline (prints plain text when piped)
+wgh open 42          # open item 42 in the browser, mark read (here + GitHub)
 wgh read 42          # mark item 42 read without opening
 
-wgh daemon install   # run the poller in the background via launchd (starts now + at login)
+wgh daemon install   # start the background poller via launchd (now + at login)
 wgh daemon status    # is it running? where are the plist and log?
 wgh daemon uninstall # stop and remove it
+
+make menu            # build and launch the menu bar app
+make menu-uninstall  # quit and remove it
 ```
 
 ## Interactive timeline
 
-Running `wgh` with no arguments (attached to a terminal) opens a full-screen
-timeline on the alternate screen — the terminal counterpart to the menu-bar app.
-A title bar tops the screen; a status bar along the bottom carries the keybindings,
-your position, and the viewer login.
-
-It's organized into four tabs (the counts update live):
+Bare `wgh` in a terminal opens a full-screen timeline; piped or redirected, it
+prints plain text so scripts keep working. It's a pure viewer over the store
+that the daemon fills, re-read every couple of seconds so new events appear live.
+Four tabs, with live counts:
 
 | Tab | Shows |
-| --- | ----- |
-| **1 · Inbox** (default) | unread items others put on you — review requests + assignments. A review request drops automatically once you've reviewed the PR's current head, and comes back if new commits land on top of your review. |
-| **2 · My PRs** | every open PR you own — one row each, even silent ones — showing its latest activity or CI/merge state |
-| **3 · Read** | items you've already handled — excludes your own PRs |
-| **4 · CI** | build pass/fail + blocked/clean on your tracked PRs |
+| --- | --- |
+| 1 Inbox | unread items others put on you: review requests, assignments |
+| 2 My PRs | every open PR you own, with its latest activity or CI/merge state |
+| 3 Read | items you've already handled |
+| 4 CI | build pass/fail and blocked/clean on your tracked PRs |
 
-| Key            | Action                                        |
-| -------------- | --------------------------------------------- |
-| `1`–`4`, `Tab` | switch tab (`Tab` cycles)                     |
-| `↑`/`↓`, `k`/`j` | move the selection                          |
-| `g` / `G`      | jump to the newest / oldest row               |
-| `PgUp`/`PgDn`  | page by a screenful                           |
-| `⏎`            | open the selected item in the browser + mark read |
-| `r`            | mark the selected item read without opening   |
-| `R`            | poll GitHub now (a manual refresh)            |
-| `q` / `Esc` / `Ctrl-C` | quit                                  |
-
-It's a pure viewer over the store — the daemon (or a one-shot sync at launch)
-fills it — and it re-reads every couple of seconds, so events the daemon collects
-appear live. Piped or redirected (`wgh | less`), it prints the plain timeline so
-scripts keep working.
+| Key | Action |
+| --- | --- |
+| 1-4, Tab | switch tab (Tab cycles) |
+| ↑/↓, k/j | move the selection |
+| g / G | jump to newest / oldest |
+| PgUp/PgDn | page by a screenful |
+| ⏎ | open the selected item in the browser + mark read |
+| r | mark read without opening |
+| R | poll GitHub now |
+| q / Esc / Ctrl-C | quit |
 
 ## Background daemon
 
-`wgh daemon install` writes a per-user **LaunchAgent** to
-`~/Library/LaunchAgents/com.watchgh.plist` pointing at the installed binary and
-loads it. A LaunchAgent (not a system LaunchDaemon) runs inside your GUI login
-session — that's what lets it post desktop notifications. It starts immediately,
-restarts at login, and `KeepAlive` respawns it if it dies. It writes a timestamped
-event log to `~/Library/Logs/watchgh.log`.
+`wgh daemon install` writes a per-user LaunchAgent to
+`~/Library/LaunchAgents/com.watchgh.plist` and loads it. Running inside your GUI
+login session is what lets it post desktop notifications. It starts immediately,
+restarts at login, respawns if it dies, and logs events to
+`~/Library/Logs/watchgh.log`. It polls into the same SQLite store `wgh` reads, so
+the timeline shows what the daemon has already collected without polling itself.
 
-Because the daemon polls into the same SQLite store, `wgh` just reads what the
-daemon has already collected — no polling on your part. The store runs in WAL
-mode so the CLI can read while the daemon writes.
+Notifications use conditional requests (a 304 costs no rate limit) and fire for
+actionable events by default (review requested, assigned, changes requested, CI
+failed). CI and blocked events come from a GraphQL poll of your open and assigned
+PRs, firing only on state transitions.
 
-## Menu-bar app
+## Menu bar
 
-`wgh-menu` is a macOS status-bar viewer built on
-[menuet](https://github.com/caseymrm/menuet). It's a **pure viewer**: it reads
-the same store the daemon fills (never polls GitHub itself) and delegates
-open/mark-read to the `wgh` CLI, so the GitHub-sync logic lives in one
-place. The menu-bar title shows the unread count (`◆ 3`); the dropdown lists the
-**unread** events (newest first) with their colored badge and a NEW/DUE pill —
-an inbox of what still needs you, not a history — and clicking a row opens it
-(marking it read here and on GitHub, which drops it from the dropdown). The full
-timeline, read items included, stays in `wgh`.
-
-The dropdown also shows the background daemon's health at the bottom — `Daemon:
-running ✓` when the poller is alive, or `Daemon: not running` with a **Start
-background poller** action when it isn't (so the menu never quietly shows a
-stale timeline because nothing is polling). Stop/restart stay in the CLI; a dead
-poller is the only daemon state worth acting on from a viewer.
-
-```sh
-make menu            # build the .app bundle and launch it (look for ◆)
-make menu-uninstall  # quit and remove the bundle
-```
-
-menuet needs cgo and must run from inside a `.app` bundle, so — unlike the
-pure-Go, cgo-free CLI/daemon — it's built and installed separately (via the
-`Makefile`, into `~/Applications/wgh-menu.app`). Toggle **Start at Login**
-from the app's own menu to keep it running across reboots.
-
-The poll loop uses GitHub's requested interval with conditional requests (a
-304 "nothing changed" costs no rate limit), records only newly-arrived events,
-and fires a desktop notification for **actionable** ones only (review requested,
-assigned, changes requested, CI failed). Notifications open the PR on click when
-[`terminal-notifier`](https://github.com/julienXX/terminal-notifier) is
-installed; otherwise it falls back to `osascript`.
-
-CI and blocked events come from a separate GraphQL poll of your open and
-assigned PRs, diffing each PR's check-rollup and merge state against the last
-value seen (stored in `pr_state`). Events fire only on transitions — a first
-sighting seeds state silently, drafts are skipped, and a failed build is
-"actionable" only when it's your own PR.
-
-State lives in a SQLite DB under your OS config dir
-(`~/Library/Application Support/watchgh/watchgh.db` on macOS). Read/resolved
-items are pruned after 7 days; unread items are never auto-removed.
+`wgh-menu` reads the same store and shows unread items with a count badge
+(`◆ 3`); clicking a row opens it and marks it read. It never polls GitHub itself,
+and delegates open/mark-read to the `wgh` CLI, so the GitHub-sync logic lives in
+one place. It needs cgo and runs from a `.app` bundle, so it builds separately
+via the `Makefile` into `~/Applications/wgh-menu.app`.
 
 ## Configuration
 
-Thresholds are tunable via an optional `config.toml` in the same directory as
-the store (`~/Library/Application Support/watchgh/config.toml` on macOS). It's
-a flat `key = value` file; every key is optional and falls back to a default,
-and a malformed file just logs a warning and uses defaults. See
-[`config.example.toml`](config.example.toml) for the full list — the DUE
-staleness window, retention period, poll floor, menu row cap, and whether to
-notify on actionable events only. Durations take Go units plus a day unit
-(`"7d"`).
+Optional `config.toml` next to the store
+(`~/Library/Application Support/watchgh/config.toml`). Flat `key = value`; every
+key is optional, and a malformed file falls back to defaults. See
+[`config.example.toml`](config.example.toml) for the full list.
 
-The poll floor defaults to `5m` — desktop notifications pull you in and `R`
-forces an on-demand refresh, so near-realtime polling is rarely worth the API
-traffic. Lower it for snappier updates, down to a `60s` minimum: the tracked-PR
-and review-state GraphQL polls key off this floor (they get no server-side
-pacing), so a lower value is rejected to stay clear of GitHub's rate limits.
+The poll floor defaults to `5m` (minimum `60s`): desktop notifications pull you
+in and `R` forces an on-demand refresh, so tighter polling rarely pays for the
+extra API traffic. State lives in a SQLite DB under
+`~/Library/Application Support/watchgh/watchgh.db`; read items are pruned after 7
+days, unread items never.
 
-Auth piggybacks on your existing credentials: `GITHUB_TOKEN` if set, otherwise
-`gh auth token`.
+## License
 
-## Reading a row
-
-```
-SEQ GUT TIME  BADGE     REPO#NUM        AUTHOR    DETAIL
-  7 DUE   2d  ◆ review  api#412         @kai      review requested
-```
-
-- **SEQ** — stable local number for `wgh open <n>` / `read <n>`.
-- **Gutter** — `DUE` needs you and has gone stale (>24h), `NEW` unread, blank read.
-- **Badge** — colored by kind; red is reserved for CI failure.
-- **REPO#NUM** — Cmd+click opens the PR (OSC 8; falls back to a raw URL).
-- **AUTHOR** — the PR author; `—` when it's yours.
+MIT — see [LICENSE](LICENSE).
