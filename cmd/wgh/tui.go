@@ -63,7 +63,7 @@ func runTUI(ctx context.Context) error {
 	// including resolving the token via `gh auth token` — the viewer login, and
 	// the first sync all happen in the background (see run), so nothing off the
 	// machine gates the first paint.
-	t := &tui{ctx: ctx, st: st}
+	t := &tui{model: model{ctx: ctx, st: st}}
 
 	// Ensure the launchd background poller is installed and running so
 	// notifications keep flowing after this window closes. Best-effort: if it
@@ -75,16 +75,25 @@ func runTUI(ctx context.Context) error {
 	return t.run()
 }
 
+// model is the store-backed data the view draws: every stored event, the
+// open-PR roster, and the per-tab badge counts. It owns reading from the store
+// and recomputing these; the surrounding tui adds only view and input state, so
+// the two concerns — what to show vs. how it's shown — live apart.
+type model struct {
+	ctx context.Context
+	st  *store.Store
+
+	all    []timeline.Event // every stored event, newest first (unfiltered)
+	prs    []timeline.Event // Mine tab: one synthesized row per open PR
+	counts []int            // per-tab row count for the tab-bar badges (recomputed on load)
+}
+
 type tui struct {
-	ctx    context.Context
-	st     *store.Store
+	model
 	c      *github.Client
 	viewer string
 
-	all      []timeline.Event // every stored event, newest first (unfiltered)
-	prs      []timeline.Event // Mine tab: one synthesized row per open PR
 	events   []timeline.Event // the active tab's visible rows
-	counts   []int            // per-tab row count for the tab-bar badges (recomputed on reload)
 	active   int              // current tab index
 	pos      []int            // remembered selection index, per tab
 	sel      int              // index of the selected row (0 = top = newest)
@@ -258,24 +267,24 @@ func (t *tui) switchTab(i int) {
 func (t *tui) cycleTab() { t.switchTab((t.active + 1) % len(tabDefs)) }
 
 // count is how many rows tab i holds (for the tab-bar badges), served from the
-// cache recount fills on reload rather than rebuilding a filtered slice per frame.
-func (t *tui) count(i int) int { return t.counts[i] }
+// cache recount fills on load rather than rebuilding a filtered slice per frame.
+func (m *model) count(i int) int { return m.counts[i] }
 
 // recount refreshes the per-tab badge counts without allocating a filtered slice
 // per tab: Mine is the roster length, the rest count matches over stored events.
-func (t *tui) recount() {
+func (m *model) recount() {
 	for i, d := range tabDefs {
 		if i == mineTab {
-			t.counts[i] = len(t.prs)
+			m.counts[i] = len(m.prs)
 			continue
 		}
 		n := 0
-		for _, e := range t.all {
+		for _, e := range m.all {
 			if d.show(e) {
 				n++
 			}
 		}
-		t.counts[i] = n
+		m.counts[i] = n
 	}
 }
 
@@ -380,34 +389,45 @@ func (t *tui) applySync(res syncResult) {
 	t.reload()
 }
 
-// reload re-reads the store (newest first) and reports whether the visible set
-// changed, so the ticker only repaints when there's something new.
+// reload re-reads the store into the model and refreshes the visible slice,
+// reporting whether the visible set changed so the ticker only repaints when
+// there's something new. A store error surfaces in the footer.
 func (t *tui) reload() bool {
-	stored, err := t.st.List(t.ctx)
+	changed, err := t.model.load()
 	if err != nil {
 		t.status = "⚠ " + err.Error()
 		return false
 	}
+	t.applyFilter()
+	return changed
+}
+
+// load re-reads the store (newest first), rebuilds the roster and badge counts,
+// and reports whether the event set changed since the last load.
+func (m *model) load() (bool, error) {
+	stored, err := m.st.List(m.ctx)
+	if err != nil {
+		return false, err
+	}
 	sort.SliceStable(stored, func(i, j int) bool {
 		return stored[i].TS.After(stored[j].TS)
 	})
-	before := signature(t.all)
-	t.all = stored
-	t.prs = t.mineRoster()
-	t.recount()
-	t.applyFilter()
-	return before != signature(t.all)
+	before := signature(m.all)
+	m.all = stored
+	m.prs = m.roster()
+	m.recount()
+	return before != signature(m.all), nil
 }
 
 // tabRows returns the row set backing tab i: the open-PR roster for Mine, else
 // the tab's filter applied over all stored events.
-func (t *tui) tabRows(i int) []timeline.Event {
+func (m *model) tabRows(i int) []timeline.Event {
 	if i == mineTab {
-		return t.prs
+		return m.prs
 	}
 	show := tabDefs[i].show
-	out := make([]timeline.Event, 0, len(t.all))
-	for _, e := range t.all {
+	out := make([]timeline.Event, 0, len(m.all))
+	for _, e := range m.all {
 		if show(e) {
 			out = append(out, e)
 		}
@@ -421,14 +441,14 @@ func (t *tui) applyFilter() {
 	t.clampSel()
 }
 
-// mineRoster builds one row per open PR: its latest activity event when there
+// roster builds one row per open PR: its latest activity event when there
 // is one, otherwise a synthesized status row so silent PRs still appear.
-func (t *tui) mineRoster() []timeline.Event {
-	prs, err := t.st.OpenPRs(t.ctx)
+func (m *model) roster() []timeline.Event {
+	prs, err := m.st.OpenPRs(m.ctx)
 	if err != nil {
 		return nil
 	}
-	latest := latestMineByPR(t.all)
+	latest := latestMineByPR(m.all)
 	out := make([]timeline.Event, 0, len(prs))
 	for _, pr := range prs {
 		if e, ok := latest[pr.Key]; ok {

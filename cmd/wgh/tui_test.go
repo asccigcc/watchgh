@@ -186,7 +186,7 @@ func TestTabFilters(t *testing.T) {
 }
 
 func TestRecountMatchesFiltersAndRoster(t *testing.T) {
-	tui := &tui{
+	m := &model{
 		counts: make([]int, len(tabDefs)),
 		all: []timeline.Event{
 			{Unread: true, IsMine: false, Source: "notification"},  // Inbox
@@ -196,13 +196,13 @@ func TestRecountMatchesFiltersAndRoster(t *testing.T) {
 		},
 		prs: []timeline.Event{{}, {}, {}}, // three roster rows
 	}
-	tui.recount()
+	m.recount()
 
 	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3).
 	want := []int{2, 3, 1, 1}
 	for i, w := range want {
-		if tui.counts[i] != w {
-			t.Errorf("counts[%d] = %d, want %d", i, tui.counts[i], w)
+		if m.counts[i] != w {
+			t.Errorf("counts[%d] = %d, want %d", i, m.counts[i], w)
 		}
 	}
 }
