@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"watchgh/internal/github"
+	"watchgh/internal/ingest"
 	"watchgh/internal/store"
 	"watchgh/internal/timeline"
 
@@ -48,15 +49,18 @@ const (
 const refreshTick = 2 * time.Second
 
 func runTUI(ctx context.Context) error {
-	c, st, err := setupLocal()
+	st, err := openStore()
 	if err != nil {
 		return err
 	}
 	defer st.Close()
+	_ = ingest.Backfill(st) // one-off cleanup of pre-fix rows
 
-	// Draw from the store immediately and freshen in the background (see run),
-	// so launch is instant instead of blocking on the network.
-	return (&tui{ctx: ctx, st: st, c: c}).run()
+	// Only the store is opened up front (local, instant). The GitHub client —
+	// including resolving the token via `gh auth token` — the viewer login, and
+	// the first sync all happen in the background (see run), so nothing off the
+	// machine gates the first paint.
+	return (&tui{ctx: ctx, st: st}).run()
 }
 
 type tui struct {
@@ -127,9 +131,10 @@ func (t *tui) run() error {
 	defer signal.Stop(winch)
 
 	// Freshen in the background now that the store has already been drawn; the
-	// first sync also resolves the viewer login the footer shows.
+	// first sync also builds the GitHub client (resolving the token) and the
+	// viewer login the footer shows.
 	syncDone := make(chan syncResult, 1)
-	go t.sync(t.viewer, syncDone)
+	go t.sync(t.c, t.viewer, syncDone)
 
 	tick := time.NewTicker(refreshTick)
 	defer tick.Stop()
@@ -183,7 +188,7 @@ func (t *tui) handle(k keyEvent, syncDone chan<- syncResult) bool {
 		t.act(false)
 	case keySync:
 		t.status = "syncing…"
-		go t.sync(t.viewer, syncDone)
+		go t.sync(t.c, t.viewer, syncDone)
 	case keyTab1:
 		t.switchTab(0)
 	case keyTab2:
@@ -243,27 +248,37 @@ func (t *tui) act(open bool) {
 // syncResult carries a finished background sync back to the main loop, which
 // owns every tui field — so the sync goroutine never writes the view directly.
 type syncResult struct {
-	viewer string // the resolved login (empty when already known or on failure)
-	status string // footer message to show
+	client *github.Client // the built client (nil unless this run created it)
+	viewer string         // the resolved login (empty when already known or on failure)
+	status string         // footer message to show
 }
 
-// sync polls GitHub once off the input path — resolving the viewer login on the
-// first run, when it's still empty — and reports the outcome on done for the
-// main loop to fold in. The store it writes is what the next reload picks up.
-func (t *tui) sync(viewer string, done chan<- syncResult) {
-	if viewer == "" {
-		v, err := t.c.Viewer(t.ctx)
+// sync polls GitHub once off the input path — building the client (which
+// resolves the token) on the first run when it's still nil, and resolving the
+// viewer login likewise — and reports the outcome on done for the main loop to
+// fold in. The store it writes is what the next reload picks up.
+func (t *tui) sync(c *github.Client, viewer string, done chan<- syncResult) {
+	if c == nil {
+		nc, err := github.New()
 		if err != nil {
-			done <- syncResult{status: "⚠ sync: " + err.Error()}
+			done <- syncResult{status: "⚠ " + err.Error()}
+			return
+		}
+		c = nc
+	}
+	if viewer == "" {
+		v, err := c.Viewer(t.ctx)
+		if err != nil {
+			done <- syncResult{client: c, status: "⚠ sync: " + err.Error()}
 			return
 		}
 		viewer = v.Login
 	}
-	_, nerr := syncNotifications(t.ctx, t.c, t.st, viewer)
-	_, terr := syncTracked(t.ctx, t.c, t.st, viewer)
-	rerr := syncReviews(t.ctx, t.c, t.st)
+	_, nerr := syncNotifications(t.ctx, c, t.st, viewer)
+	_, terr := syncTracked(t.ctx, c, t.st, viewer)
+	rerr := syncReviews(t.ctx, c, t.st)
 	t.st.Prune(cfg.Retention)
-	done <- syncResult{viewer: viewer, status: syncStatus(nerr, terr, rerr)}
+	done <- syncResult{client: c, viewer: viewer, status: syncStatus(nerr, terr, rerr)}
 }
 
 // syncStatus turns the three sync errors into the footer message, reporting the
@@ -281,9 +296,13 @@ func syncStatus(nerr, terr, rerr error) string {
 	}
 }
 
-// applySync folds a finished background sync into the view: adopt the resolved
-// viewer login, show its status, and re-read the freshly-written store.
+// applySync folds a finished background sync into the view: cache the built
+// client and resolved viewer login so later syncs reuse them, show its status,
+// and re-read the freshly-written store.
 func (t *tui) applySync(res syncResult) {
+	if res.client != nil {
+		t.c = res.client
+	}
 	if res.viewer != "" {
 		t.viewer = res.viewer
 	}
