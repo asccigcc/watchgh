@@ -132,8 +132,8 @@ func gutterMark(e Event, now time.Time, staleAfter time.Duration) (string, color
 	return "", ""
 }
 
-// Relative renders a compact human age ("now", "5m", "3h", "2d") for reuse
-// outside the timeline renderer (e.g. the menu-bar app).
+// Relative renders a compact human age ("now", "5m", "3h", "2d"), exported for
+// reuse outside the timeline renderer.
 func Relative(d time.Duration) string { return relative(d) }
 
 func relative(d time.Duration) string {

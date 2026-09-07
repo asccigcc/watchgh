@@ -19,9 +19,6 @@ func TestDefaults(t *testing.T) {
 	if d.PollFloor != 5*time.Minute {
 		t.Errorf("PollFloor = %v, want 5m", d.PollFloor)
 	}
-	if d.MenuRows != 5 {
-		t.Errorf("MenuRows = %d, want 5", d.MenuRows)
-	}
 	if !d.NotifyActionableOnly {
 		t.Errorf("NotifyActionableOnly = false, want true")
 	}
@@ -32,7 +29,6 @@ func TestParseFullOverlay(t *testing.T) {
 stale_after   = "12h"
 retention     = "14d"
 poll_floor    = "90s"
-menu_rows     = 8
 actionable_only_notify = false
 `
 	c, err := Parse(strings.NewReader(in))
@@ -48,21 +44,18 @@ actionable_only_notify = false
 	if c.PollFloor != 90*time.Second {
 		t.Errorf("PollFloor = %v", c.PollFloor)
 	}
-	if c.MenuRows != 8 {
-		t.Errorf("MenuRows = %d", c.MenuRows)
-	}
 	if c.NotifyActionableOnly {
 		t.Errorf("NotifyActionableOnly = true, want false")
 	}
 }
 
 func TestParsePartialKeepsDefaults(t *testing.T) {
-	c, err := Parse(strings.NewReader(`menu_rows = 3`))
+	c, err := Parse(strings.NewReader(`poll_floor = "90s"`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.MenuRows != 3 {
-		t.Errorf("MenuRows = %d, want 3", c.MenuRows)
+	if c.PollFloor != 90*time.Second {
+		t.Errorf("PollFloor = %v, want 90s", c.PollFloor)
 	}
 	// Everything unset stays at the default.
 	if c.StaleAfter != 24*time.Hour || c.Retention != 7*24*time.Hour {
@@ -93,7 +86,7 @@ func TestParseDurationDays(t *testing.T) {
 func TestParseCommentsAndBlanks(t *testing.T) {
 	in := `
 # a full-line comment
-menu_rows = 4   # trailing comment
+actionable_only_notify = false   # trailing comment
 
 poll_floor = "60s"
 `
@@ -101,8 +94,8 @@ poll_floor = "60s"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.MenuRows != 4 {
-		t.Errorf("MenuRows = %d, want 4 (trailing comment not stripped?)", c.MenuRows)
+	if c.NotifyActionableOnly {
+		t.Errorf("NotifyActionableOnly = true, want false (trailing comment not stripped?)")
 	}
 	if c.PollFloor != 60*time.Second {
 		t.Errorf("PollFloor = %v", c.PollFloor)
@@ -110,20 +103,18 @@ poll_floor = "60s"
 }
 
 func TestParseUnknownKeyIgnored(t *testing.T) {
-	c, err := Parse(strings.NewReader("future_setting = 42\nmenu_rows = 2"))
+	c, err := Parse(strings.NewReader("future_setting = 42\npoll_floor = \"90s\""))
 	if err != nil {
 		t.Fatalf("unknown key should be ignored, got error: %v", err)
 	}
-	if c.MenuRows != 2 {
-		t.Errorf("MenuRows = %d", c.MenuRows)
+	if c.PollFloor != 90*time.Second {
+		t.Errorf("PollFloor = %v, want 90s", c.PollFloor)
 	}
 }
 
 func TestParseRejectsBadValues(t *testing.T) {
 	bad := []string{
 		`stale_after = "banana"`,
-		`menu_rows = 0`,
-		`menu_rows = notanint`,
 		`poll_floor = "-5s"`,
 		`poll_floor = "10s"`, // below the MinPollFloor guardrail
 		`actionable_only_notify = maybe`,
@@ -158,14 +149,14 @@ func TestLoadFileMissingReturnsDefaults(t *testing.T) {
 
 func TestLoadFileParses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte(`menu_rows = 9`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`poll_floor = "90s"`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	c, err := LoadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.MenuRows != 9 {
-		t.Errorf("MenuRows = %d, want 9", c.MenuRows)
+	if c.PollFloor != 90*time.Second {
+		t.Errorf("PollFloor = %v, want 90s", c.PollFloor)
 	}
 }

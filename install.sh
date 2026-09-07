@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# watchgh installer. Downloads the prebuilt wgh CLI/daemon from the latest
-# GitHub release and installs it on your PATH. No Go toolchain required.
+# watchgh installer. Downloads the prebuilt wgh binary from the latest GitHub
+# release and installs it on your PATH. No Go toolchain required.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
@@ -25,7 +25,7 @@ die()  { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # --- preflight ------------------------------------------------------------
-[ "$(uname -s)" = "Darwin" ] || die "watchgh is macOS-only (needs launchd + the menu bar)."
+[ "$(uname -s)" = "Darwin" ] || die "watchgh is macOS-only."
 case "$(uname -m)" in
   arm64)  ASSET="wgh-darwin-arm64" ;;
   x86_64) ASSET="wgh-darwin-amd64" ;;
@@ -75,5 +75,4 @@ else
 fi
 
 echo
-info "wgh                  # open the interactive timeline"
-info "wgh daemon install   # run the background poller (desktop notifications)"
+info "wgh   # open the interactive timeline (polls in the background)"

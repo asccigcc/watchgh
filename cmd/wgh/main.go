@@ -1,12 +1,12 @@
 // Command wgh shows GitHub activity you care about as an arrival-ordered
 // timeline: notifications (reviews/assigns/comments) plus tracked-PR CI and
-// merge-state transitions, with desktop notifications from a background daemon.
+// merge-state transitions. The interactive view polls GitHub in the background
+// and posts desktop notifications for actionable events while it's open.
 package main
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"watchgh/internal/config"
-	"watchgh/internal/daemon"
 	"watchgh/internal/github"
 	"watchgh/internal/ingest"
 	"watchgh/internal/notify"
@@ -43,7 +42,8 @@ func main() {
 		cfg = c
 	}
 
-	// SIGTERM as well as SIGINT: launchd stops the daemon with SIGTERM on unload.
+	// Handle SIGTERM as well as SIGINT so the TUI restores the terminal and
+	// closes the store cleanly however it's asked to stop.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -58,8 +58,6 @@ func main() {
 		} else {
 			err = runList(ctx)
 		}
-	case "daemon":
-		err = runDaemon(ctx, args)
 	case "open":
 		err = runMark(ctx, args, true)
 	case "read":
@@ -84,11 +82,10 @@ Usage:
   wgh               Interactive timeline (arrows/⏎/r/q); prints plain when piped
   wgh open <n>      Open item <n> in the browser and mark it read (here + GitHub)
   wgh read <n>      Mark item <n> read without opening
-  wgh daemon <cmd>  Background poller: install | uninstall | status
   wgh help          Show this help
 
-The daemon runs the poll loop continuously via launchd, so desktop
-notifications fire even with no terminal open; the timeline just reads the store.`)
+The interactive timeline polls GitHub in the background and posts desktop
+notifications for actionable events while it's open.`)
 }
 
 func runList(ctx context.Context) error {
@@ -122,139 +119,6 @@ func runList(ctx context.Context) error {
 	}
 	fmt.Print(out)
 	return nil
-}
-
-// runDaemon dispatches the `daemon` subcommands. `run` is the headless poll loop
-// launchd invokes; install/uninstall/status manage the LaunchAgent.
-func runDaemon(ctx context.Context, args []string) error {
-	sub := "status"
-	if len(args) > 0 {
-		sub = args[0]
-	}
-	switch sub {
-	case "run":
-		return runDaemonLoop(ctx)
-	case "install":
-		if err := daemon.Install(); err != nil {
-			return err
-		}
-		logPath, _ := daemon.LogPath()
-		fmt.Println("✓ wgh daemon installed and started")
-		fmt.Println(dim("  polls in the background and posts desktop notifications, no terminal needed"))
-		fmt.Println(dim("  log: " + logPath))
-		return nil
-	case "uninstall":
-		if err := daemon.Uninstall(); err != nil {
-			return err
-		}
-		fmt.Println("✓ wgh daemon stopped and removed")
-		return nil
-	case "status":
-		s, err := daemon.Status()
-		if err != nil {
-			return err
-		}
-		fmt.Println(s)
-		return nil
-	default:
-		return fmt.Errorf("unknown daemon command %q (want run, install, uninstall, or status)", sub)
-	}
-}
-
-// runDaemonLoop is the always-on poller. It has no terminal: it logs events with
-// timestamps (launchd captures this to the log file) and fires notifications.
-func runDaemonLoop(ctx context.Context) error {
-	lg := log.New(os.Stdout, "", log.LstdFlags)
-	c, st, viewer, err := setup(ctx)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-
-	w := newWatcher(c, st, viewer, func(m string) { lg.Println("warn:", m) })
-	w.baseline(ctx) // silent: no alerts on the pre-existing backlog
-	lg.Printf("started; watching as %s", viewer)
-
-	for {
-		select {
-		case <-ctx.Done():
-			lg.Println("stopped")
-			return nil
-		case <-time.After(w.interval):
-		}
-		fresh := w.tick(ctx)
-		for _, e := range fresh {
-			b := e.Kind.Badge()
-			lg.Printf("%s %s — %s", b.Label, timeline.ShortRef(e.Repo, e.Number), e.Detail)
-		}
-		notifyActionable(fresh)
-	}
-}
-
-// watcher holds the poll-loop state the daemon runs on.
-type watcher struct {
-	c            *github.Client
-	st           *store.Store
-	viewer       string
-	interval     time.Duration
-	lastModified string
-	warn         func(msg string)
-}
-
-func newWatcher(c *github.Client, st *store.Store, viewer string, warn func(string)) *watcher {
-	return &watcher{c: c, st: st, viewer: viewer, interval: cfg.PollFloor, warn: warn}
-}
-
-// baseline runs the initial silent sync (seeding tracked-PR state without
-// alerting on the pre-existing backlog) and returns the stored timeline so far.
-func (w *watcher) baseline(ctx context.Context) []timeline.Event {
-	syncNotifications(ctx, w.c, w.st, w.viewer)
-	syncTracked(ctx, w.c, w.st, w.viewer)
-	syncReviews(ctx, w.c, w.st)
-	w.st.Prune(cfg.Retention)
-	stored, _ := w.st.List()
-	return stored
-}
-
-// tick runs one poll cycle and returns freshly-arrived events.
-func (w *watcher) tick(ctx context.Context) []timeline.Event {
-	var fresh []timeline.Event
-
-	// Notifications: conditional GET as a cheap change detector.
-	changed, lm, poll, err := w.c.CheckNotifications(ctx, w.lastModified)
-	if err != nil {
-		if ctx.Err() == nil {
-			w.warn("poll failed, retrying: " + err.Error())
-		}
-	} else {
-		if poll > 0 {
-			w.interval = max(poll, cfg.PollFloor)
-		}
-		if changed {
-			w.lastModified = lm
-			if nf, err := syncNotifications(ctx, w.c, w.st, w.viewer); err == nil {
-				fresh = append(fresh, nf...)
-			} else {
-				w.warn("notifications sync failed: " + err.Error())
-			}
-		}
-	}
-
-	// Tracked PRs (CI/merge) have no notification signal — poll every tick.
-	if tf, err := syncTracked(ctx, w.c, w.st, w.viewer); err == nil {
-		fresh = append(fresh, tf...)
-	} else {
-		w.warn("tracked-PR poll failed: " + err.Error())
-	}
-
-	// Review state has no notification signal (a fresh commit on a PR you've
-	// reviewed fires nothing) — reconcile every tick, like the tracked-PR poll.
-	if err := syncReviews(ctx, w.c, w.st); err != nil {
-		w.warn("review-state poll failed: " + err.Error())
-	}
-
-	w.st.Prune(cfg.Retention)
-	return fresh
 }
 
 // syncNotifications polls the notifications feed into the store and returns the
@@ -421,8 +285,7 @@ func applyMark(ctx context.Context, st *store.Store, e timeline.Event, open bool
 }
 
 // setup opens the API client and store and resolves the viewer login — the
-// common preamble for the one-shot list and the daemon, which both need the
-// viewer up front.
+// preamble for the one-shot piped list, which needs the viewer up front.
 func setup(ctx context.Context) (*github.Client, *store.Store, string, error) {
 	c, st, err := setupLocal()
 	if err != nil {

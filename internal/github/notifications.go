@@ -66,18 +66,6 @@ func (c *Client) Notifications(ctx context.Context) ([]Notification, error) {
 	return all, nil
 }
 
-// CheckNotifications is a cheap conditional GET used by the watch loop as a
-// change detector: it reports whether anything changed since ifModifiedSince,
-// plus the server's requested poll spacing. A 304 costs no rate limit.
-func (c *Client) CheckNotifications(ctx context.Context, ifModifiedSince string) (changed bool, lastModified string, poll time.Duration, err error) {
-	var discard []Notification
-	meta, err := c.getWithMeta(ctx, "/notifications?per_page=50", ifModifiedSince, &discard)
-	if err != nil {
-		return false, "", 0, err
-	}
-	return !meta.NotModified, meta.LastModified, meta.PollInterval, nil
-}
-
 // MarkThreadRead marks a notification thread read on GitHub's side.
 func (c *Client) MarkThreadRead(ctx context.Context, threadID string) error {
 	return c.patch(ctx, "/notifications/threads/"+threadID)

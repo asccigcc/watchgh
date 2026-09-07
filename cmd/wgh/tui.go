@@ -1,8 +1,8 @@
 // The interactive timeline: bare `wgh` on an alt-screen, arrow keys to
 // move, Enter to open (marking read), r to mark read, R to re-sync, q to quit.
-// It's a pure viewer over the store — the daemon (or a background sync kicked
-// off at launch) fills it — that re-reads on a ticker so daemon-fed events
-// appear live.
+// A background goroutine polls GitHub on a ticker (and on launch and R), writing
+// to the store and posting desktop notifications for actionable events; the view
+// re-reads the store on its own ticker so new events appear live.
 package main
 
 import (
@@ -45,7 +45,7 @@ const (
 )
 
 // refreshTick is how often the viewer re-reads the store to pick up events the
-// daemon wrote. Cheap: a single indexed query against a local SQLite file.
+// background poll wrote. Cheap: a single indexed query against a local SQLite file.
 const refreshTick = 2 * time.Second
 
 func runTUI(ctx context.Context) error {
@@ -134,12 +134,17 @@ func (t *tui) run() error {
 
 	// Freshen in the background now that the store has already been drawn; the
 	// first sync also builds the GitHub client (resolving the token) and the
-	// viewer login the footer shows.
+	// viewer login the footer shows. Silent: no notifications on the backlog.
 	syncDone := make(chan syncResult, 1)
-	go t.sync(t.c, t.viewer, syncDone)
+	go t.sync(t.c, t.viewer, false, syncDone)
 
 	tick := time.NewTicker(refreshTick)
 	defer tick.Stop()
+
+	// Poll GitHub in the background on its own cadence so an open wgh stays
+	// fresh and fires desktop notifications without a separate daemon.
+	poll := time.NewTicker(cfg.PollFloor)
+	defer poll.Stop()
 
 	for {
 		select {
@@ -150,6 +155,12 @@ func (t *tui) run() error {
 			t.draw()
 		case <-tick.C:
 			if t.reload() {
+				t.draw()
+			}
+		case <-poll.C:
+			if !t.syncing { // skip if the previous poll is still running
+				t.syncing = true
+				go t.sync(t.c, t.viewer, true, syncDone)
 				t.draw()
 			}
 		case res := <-syncDone:
@@ -190,7 +201,7 @@ func (t *tui) handle(k keyEvent, syncDone chan<- syncResult) bool {
 		t.act(false)
 	case keySync:
 		t.syncing = true
-		go t.sync(t.c, t.viewer, syncDone)
+		go t.sync(t.c, t.viewer, false, syncDone)
 	case keyTab1:
 		t.switchTab(0)
 	case keyTab2:
@@ -258,8 +269,9 @@ type syncResult struct {
 // sync polls GitHub once off the input path — building the client (which
 // resolves the token) on the first run when it's still nil, and resolving the
 // viewer login likewise — and reports the outcome on done for the main loop to
-// fold in. The store it writes is what the next reload picks up.
-func (t *tui) sync(c *github.Client, viewer string, done chan<- syncResult) {
+// fold in. The store it writes is what the next reload picks up. When notify is
+// set it posts desktop notifications for freshly-arrived actionable events.
+func (t *tui) sync(c *github.Client, viewer string, notify bool, done chan<- syncResult) {
 	if c == nil {
 		nc, err := github.New()
 		if err != nil {
@@ -276,10 +288,15 @@ func (t *tui) sync(c *github.Client, viewer string, done chan<- syncResult) {
 		}
 		viewer = v.Login
 	}
-	_, nerr := syncNotifications(t.ctx, c, t.st, viewer)
-	_, terr := syncTracked(t.ctx, c, t.st, viewer)
+	nf, nerr := syncNotifications(t.ctx, c, t.st, viewer)
+	tf, terr := syncTracked(t.ctx, c, t.st, viewer)
 	rerr := syncReviews(t.ctx, c, t.st)
 	t.st.Prune(cfg.Retention)
+	// Only the timer-driven poll notifies: on launch we'd alert on the whole
+	// backlog, and on a manual R you're already looking at the screen.
+	if notify {
+		notifyActionable(append(nf, tf...))
+	}
 	done <- syncResult{client: c, viewer: viewer, warn: syncWarning(nerr, terr, rerr)}
 }
 

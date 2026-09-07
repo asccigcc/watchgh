@@ -1,9 +1,10 @@
 # watchgh
 
 A GitHub activity timeline for your terminal: the PRs, reviews, and CI runs that
-need you, in the order they arrive. A background daemon polls GitHub and posts
-desktop notifications; `wgh` shows the timeline in your terminal. Auth piggybacks
-on your credentials (`GITHUB_TOKEN` if set, otherwise `gh auth token`).
+need you, in the order they arrive. `wgh` shows the timeline in your terminal,
+polls GitHub in the background while it's open, and posts desktop notifications
+for actionable events. Auth piggybacks on your credentials (`GITHUB_TOKEN` if
+set, otherwise `gh auth token`).
 
 ## Install
 
@@ -24,21 +25,18 @@ BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
 ## Commands
 
 ```sh
-wgh                  # interactive timeline (prints plain text when piped)
-wgh open 42          # open item 42 in the browser, mark read (here + GitHub)
-wgh read 42          # mark item 42 read without opening
-
-wgh daemon install   # start the background poller via launchd (now + at login)
-wgh daemon status    # is it running? where are the plist and log?
-wgh daemon uninstall # stop and remove it
+wgh          # interactive timeline (prints plain text when piped)
+wgh open 42  # open item 42 in the browser, mark read (here + GitHub)
+wgh read 42  # mark item 42 read without opening
 ```
 
 ## Interactive timeline
 
 Bare `wgh` in a terminal opens a full-screen timeline; piped or redirected, it
-prints plain text so scripts keep working. It's a pure viewer over the store
-that the daemon fills, re-read every couple of seconds so new events appear live.
-Four tabs, with live counts:
+prints plain text so scripts keep working. It polls GitHub in the background on
+the poll-floor cadence (and on launch, and on `R`), writing to a local store it
+re-reads every couple of seconds so new events appear live. A `⟳ syncing` marker
+in the title bar shows when a poll is in flight. Four tabs, with live counts:
 
 | Tab | Shows |
 | --- | --- |
@@ -58,19 +56,14 @@ Four tabs, with live counts:
 | R | poll GitHub now |
 | q / Esc / Ctrl-C | quit |
 
-## Background daemon
+## Notifications
 
-`wgh daemon install` writes a per-user LaunchAgent to
-`~/Library/LaunchAgents/com.watchgh.plist` and loads it. Running inside your GUI
-login session is what lets it post desktop notifications. It starts immediately,
-restarts at login, respawns if it dies, and logs events to
-`~/Library/Logs/watchgh.log`. It polls into the same SQLite store `wgh` reads, so
-the timeline shows what the daemon has already collected without polling itself.
-
-Notifications use conditional requests (a 304 costs no rate limit) and fire for
-actionable events by default (review requested, assigned, changes requested, CI
-failed). CI and blocked events come from a GraphQL poll of your open and assigned
-PRs, firing only on state transitions.
+While `wgh` is open it posts a desktop notification for each freshly-arrived
+actionable event (review requested, assigned, changes requested, CI failed). The
+launch sync is silent so you aren't alerted about the existing backlog, and a
+manual `R` is silent too since you're already looking. CI and blocked events come
+from a GraphQL poll of your open and assigned PRs, firing only on state
+transitions.
 
 ## Configuration
 
@@ -79,9 +72,10 @@ Optional `config.toml` next to the store
 key is optional, and a malformed file falls back to defaults. See
 [`config.example.toml`](config.example.toml) for the full list.
 
-The poll floor defaults to `5m` (minimum `60s`): desktop notifications pull you
-in and `R` forces an on-demand refresh, so tighter polling rarely pays for the
-extra API traffic. State lives in a SQLite DB under
+The poll floor sets the background poll cadence; it defaults to `5m` (minimum
+`60s`). Desktop notifications pull you in and `R` forces an on-demand refresh, so
+tighter polling rarely pays for the extra API traffic. State lives in a SQLite DB
+under
 `~/Library/Application Support/watchgh/watchgh.db`; read items are pruned after 7
 days, unread items never.
 

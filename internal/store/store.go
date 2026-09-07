@@ -103,8 +103,8 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	// WAL lets a reader (CLI) run while the daemon writes; busy_timeout rides
-	// out brief lock contention between the two processes.
+	// WAL keeps reads snappy alongside the background poll writes; busy_timeout
+	// rides out brief lock contention.
 	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -225,15 +225,6 @@ FROM events ORDER BY ts ASC`)
 		out = append(out, e)
 	}
 	return out, rows.Err()
-}
-
-// UnreadCount returns how many events are effectively unread (not locally read
-// and still unread on GitHub) — used for the menu-bar badge.
-func (s *Store) UnreadCount() (int, error) {
-	var n int
-	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM events WHERE read_at IS NULL AND github_unread=1`).Scan(&n)
-	return n, err
 }
 
 // Get returns a single event by its local seq.

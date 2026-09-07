@@ -16,21 +16,19 @@ import (
 	"time"
 )
 
-// Config holds the thresholds that were previously hardcoded across the CLI,
-// renderer, and menu-bar app.
+// Config holds the thresholds that were previously hardcoded across the CLI and
+// renderer.
 type Config struct {
 	StaleAfter           time.Duration // unread + actionable older than this earns the DUE marker
 	Retention            time.Duration // prune read/resolved events older than this
-	PollFloor            time.Duration // minimum spacing between polls, regardless of server hints
-	MenuRows             int           // max rows shown in the menu-bar dropdown
+	PollFloor            time.Duration // spacing between background polls
 	NotifyActionableOnly bool          // desktop-notify actionable events only
 }
 
-// MinPollFloor is the smallest poll_floor we accept. The notification poll
-// already can't beat GitHub's X-Poll-Interval, but the tracked-PR and
-// review-state GraphQL polls run every tick with no server-side pacing, so the
-// floor is their only governor — this keeps a fat-fingered value from hammering
-// the API into GitHub's secondary rate limits.
+// MinPollFloor is the smallest poll_floor we accept. The tracked-PR and
+// review-state GraphQL polls run on every sync with no server-side pacing, so
+// the floor is their only governor — it keeps a fat-fingered value from
+// hammering the API into GitHub's secondary rate limits.
 const MinPollFloor = 60 * time.Second
 
 // Defaults returns the built-in configuration used when no file (or no key) is
@@ -40,7 +38,6 @@ func Defaults() Config {
 		StaleAfter:           24 * time.Hour,
 		Retention:            7 * 24 * time.Hour,
 		PollFloor:            5 * time.Minute,
-		MenuRows:             5,
 		NotifyActionableOnly: true,
 	}
 }
@@ -135,12 +132,6 @@ func (c *Config) set(key, val string) error {
 		return setDuration(&c.Retention, val)
 	case "poll_floor":
 		return setDuration(&c.PollFloor, val)
-	case "menu_rows":
-		n, err := strconv.Atoi(val)
-		if err != nil {
-			return fmt.Errorf("menu_rows: %v", err)
-		}
-		c.MenuRows = n
 	case "actionable_only_notify":
 		b, err := strconv.ParseBool(val)
 		if err != nil {
@@ -181,8 +172,6 @@ func (c Config) validate() error {
 		return errors.New("retention must be positive")
 	case c.PollFloor < MinPollFloor:
 		return fmt.Errorf("poll_floor must be at least %s (guards against GitHub rate limits)", MinPollFloor)
-	case c.MenuRows < 1:
-		return errors.New("menu_rows must be at least 1")
 	}
 	return nil
 }
