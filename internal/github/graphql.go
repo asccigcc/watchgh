@@ -280,6 +280,9 @@ func (c *Client) graphql(ctx context.Context, query string, vars map[string]any,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if rl := rateLimitError(resp); rl != nil {
+			return rl
+		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("graphql: %s: %s", resp.Status, b)
 	}
