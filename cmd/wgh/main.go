@@ -167,27 +167,42 @@ func syncTracked(ctx context.Context, c *github.Client, st *store.Store, viewer 
 	}
 	mineKeys := make(map[string]bool)
 	var events []timeline.Event
+	// Store writes here are best-effort per PR — one failing row shouldn't abort
+	// the rest — but the first error is kept and returned so it's surfaced (footer
+	// warning in the TUI, stderr in the poller/list) rather than silently dropped.
+	var storeErr error
+	note := func(err error) {
+		if err != nil && storeErr == nil {
+			storeErr = err
+		}
+	}
 	for _, pr := range prs {
 		key := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
 		if pr.Author == viewer { // keep the roster of my open PRs (incl. drafts)
 			mineKeys[key] = true
-			_ = st.SetOpenPR(toOpenPR(pr, key))
+			note(st.SetOpenPR(toOpenPR(pr, key)))
 		}
 		if pr.IsDraft { // don't nag about a work-in-progress
 			continue
 		}
 		prev, existed, err := st.GetPRState(key)
 		if err != nil {
+			note(err)
 			continue
 		}
 		evs, next := tracker.Diff(prev, existed, pr, viewer, time.Now())
 		if err := st.SetPRState(next); err != nil {
+			note(err)
 			continue
 		}
 		events = append(events, evs...)
 	}
-	_ = st.ReconcileOpenPRs(mineKeys) // drop PRs that have since merged/closed
-	return persist(st, events)
+	note(st.ReconcileOpenPRs(mineKeys)) // drop PRs that have since merged/closed
+	fresh, err := persist(st, events)
+	if err != nil {
+		return nil, err
+	}
+	return fresh, storeErr
 }
 
 // syncReviews reconciles review-request items against whether the viewer has
