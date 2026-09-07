@@ -95,7 +95,7 @@ func TestParseCommentsAndBlanks(t *testing.T) {
 # a full-line comment
 menu_rows = 4   # trailing comment
 
-poll_floor = "30s"
+poll_floor = "60s"
 `
 	c, err := Parse(strings.NewReader(in))
 	if err != nil {
@@ -104,7 +104,7 @@ poll_floor = "30s"
 	if c.MenuRows != 4 {
 		t.Errorf("MenuRows = %d, want 4 (trailing comment not stripped?)", c.MenuRows)
 	}
-	if c.PollFloor != 30*time.Second {
+	if c.PollFloor != 60*time.Second {
 		t.Errorf("PollFloor = %v", c.PollFloor)
 	}
 }
@@ -137,7 +137,7 @@ func TestParseRejectsBadValues(t *testing.T) {
 }
 
 func TestParseAcceptsPollFloorAtMinimum(t *testing.T) {
-	c, err := Parse(strings.NewReader(`poll_floor = "30s"`))
+	c, err := Parse(strings.NewReader(`poll_floor = "60s"`))
 	if err != nil {
 		t.Fatalf("poll_floor at the minimum should be accepted: %v", err)
 	}

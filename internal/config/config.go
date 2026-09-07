@@ -31,7 +31,7 @@ type Config struct {
 // review-state GraphQL polls run every tick with no server-side pacing, so the
 // floor is their only governor — this keeps a fat-fingered value from hammering
 // the API into GitHub's secondary rate limits.
-const MinPollFloor = 30 * time.Second
+const MinPollFloor = 60 * time.Second
 
 // Defaults returns the built-in configuration used when no file (or no key) is
 // present.

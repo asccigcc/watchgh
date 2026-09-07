@@ -155,7 +155,7 @@ notify on actionable events only. Durations take Go units plus a day unit
 
 The poll floor defaults to `5m` — desktop notifications pull you in and `R`
 forces an on-demand refresh, so near-realtime polling is rarely worth the API
-traffic. Lower it for snappier updates, down to a `30s` minimum: the tracked-PR
+traffic. Lower it for snappier updates, down to a `60s` minimum: the tracked-PR
 and review-state GraphQL polls key off this floor (they get no server-side
 pacing), so a lower value is rejected to stay clear of GitHub's rate limits.
 
