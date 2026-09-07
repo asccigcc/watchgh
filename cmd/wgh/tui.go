@@ -1,7 +1,8 @@
 // The interactive timeline: bare `wgh` on an alt-screen, arrow keys to
 // move, Enter to open (marking read), r to mark read, R to re-sync, q to quit.
-// It's a pure viewer over the store — the daemon (or an initial one-shot sync)
-// fills it — that re-reads on a ticker so daemon-fed events appear live.
+// It's a pure viewer over the store — the daemon (or a background sync kicked
+// off at launch) fills it — that re-reads on a ticker so daemon-fed events
+// appear live.
 package main
 
 import (
@@ -47,19 +48,15 @@ const (
 const refreshTick = 2 * time.Second
 
 func runTUI(ctx context.Context) error {
-	c, st, viewer, err := setup(ctx)
+	c, st, err := setupLocal()
 	if err != nil {
 		return err
 	}
 	defer st.Close()
 
-	// Freshen once at launch so the timeline is useful even with no daemon.
-	syncNotifications(ctx, c, st, viewer)
-	syncTracked(ctx, c, st, viewer)
-	syncReviews(ctx, c, st)
-	st.Prune(cfg.Retention)
-
-	return (&tui{ctx: ctx, st: st, c: c, viewer: viewer}).run()
+	// Draw from the store immediately and freshen in the background (see run),
+	// so launch is instant instead of blocking on the network.
+	return (&tui{ctx: ctx, st: st, c: c}).run()
 }
 
 type tui struct {
@@ -129,7 +126,11 @@ func (t *tui) run() error {
 	signal.Notify(winch, syscall.SIGWINCH)
 	defer signal.Stop(winch)
 
-	refreshed := make(chan struct{}, 1)
+	// Freshen in the background now that the store has already been drawn; the
+	// first sync also resolves the viewer login the footer shows.
+	syncDone := make(chan syncResult, 1)
+	go t.sync(t.viewer, syncDone)
+
 	tick := time.NewTicker(refreshTick)
 	defer tick.Stop()
 
@@ -144,14 +145,14 @@ func (t *tui) run() error {
 			if t.reload() {
 				t.draw()
 			}
-		case <-refreshed:
-			t.reload()
+		case res := <-syncDone:
+			t.applySync(res)
 			t.draw()
 		case k, ok := <-keys:
 			if !ok {
 				return nil
 			}
-			if t.handle(k, refreshed) {
+			if t.handle(k, syncDone) {
 				return nil
 			}
 			t.draw()
@@ -160,7 +161,7 @@ func (t *tui) run() error {
 }
 
 // handle applies a keypress and reports whether the TUI should quit.
-func (t *tui) handle(k keyEvent, refreshed chan<- struct{}) bool {
+func (t *tui) handle(k keyEvent, syncDone chan<- syncResult) bool {
 	switch k.kind {
 	case keyQuit:
 		return true
@@ -182,7 +183,7 @@ func (t *tui) handle(k keyEvent, refreshed chan<- struct{}) bool {
 		t.act(false)
 	case keySync:
 		t.status = "syncing…"
-		go t.sync(refreshed)
+		go t.sync(t.viewer, syncDone)
 	case keyTab1:
 		t.switchTab(0)
 	case keyTab2:
@@ -239,26 +240,55 @@ func (t *tui) act(open bool) {
 	t.reload()
 }
 
-// sync polls GitHub once (off the input path) and signals a redraw when done.
-func (t *tui) sync(refreshed chan<- struct{}) {
-	_, nerr := syncNotifications(t.ctx, t.c, t.st, t.viewer)
-	_, terr := syncTracked(t.ctx, t.c, t.st, t.viewer)
+// syncResult carries a finished background sync back to the main loop, which
+// owns every tui field — so the sync goroutine never writes the view directly.
+type syncResult struct {
+	viewer string // the resolved login (empty when already known or on failure)
+	status string // footer message to show
+}
+
+// sync polls GitHub once off the input path — resolving the viewer login on the
+// first run, when it's still empty — and reports the outcome on done for the
+// main loop to fold in. The store it writes is what the next reload picks up.
+func (t *tui) sync(viewer string, done chan<- syncResult) {
+	if viewer == "" {
+		v, err := t.c.Viewer(t.ctx)
+		if err != nil {
+			done <- syncResult{status: "⚠ sync: " + err.Error()}
+			return
+		}
+		viewer = v.Login
+	}
+	_, nerr := syncNotifications(t.ctx, t.c, t.st, viewer)
+	_, terr := syncTracked(t.ctx, t.c, t.st, viewer)
 	rerr := syncReviews(t.ctx, t.c, t.st)
 	t.st.Prune(cfg.Retention)
+	done <- syncResult{viewer: viewer, status: syncStatus(nerr, terr, rerr)}
+}
+
+// syncStatus turns the three sync errors into the footer message, reporting the
+// first failure or the success time.
+func syncStatus(nerr, terr, rerr error) string {
 	switch {
 	case nerr != nil:
-		t.status = "⚠ sync: " + nerr.Error()
+		return "⚠ sync: " + nerr.Error()
 	case terr != nil:
-		t.status = "⚠ tracked-PR sync: " + terr.Error()
+		return "⚠ tracked-PR sync: " + terr.Error()
 	case rerr != nil:
-		t.status = "⚠ review-state sync: " + rerr.Error()
+		return "⚠ review-state sync: " + rerr.Error()
 	default:
-		t.status = "synced " + time.Now().Format("15:04:05")
+		return "synced " + time.Now().Format("15:04:05")
 	}
-	select {
-	case refreshed <- struct{}{}:
-	default:
+}
+
+// applySync folds a finished background sync into the view: adopt the resolved
+// viewer login, show its status, and re-read the freshly-written store.
+func (t *tui) applySync(res syncResult) {
+	if res.viewer != "" {
+		t.viewer = res.viewer
 	}
+	t.status = res.status
+	t.reload()
 }
 
 // reload re-reads the store (newest first) and reports whether the visible set
@@ -456,7 +486,11 @@ func (t *tui) footer() string {
 		pos = fmt.Sprintf(" [%d/%d]", t.sel+1, len(t.events))
 	}
 	status := fmt.Sprintf(" %s%s", t.status, pos)
-	user := fmt.Sprintf(" @%s ", t.viewer)
+	login := t.viewer
+	if login == "" {
+		login = "…" // not resolved yet; the first background sync fills it in
+	}
+	user := fmt.Sprintf(" @%s ", login)
 
 	uw := utf8.RuneCountInString(user)
 	if uw > t.cols {

@@ -421,23 +421,35 @@ func applyMark(ctx context.Context, st *store.Store, e timeline.Event, open bool
 }
 
 // setup opens the API client and store and resolves the viewer login — the
-// common preamble for list, watch, and the daemon.
+// common preamble for the one-shot list and the daemon, which both need the
+// viewer up front.
 func setup(ctx context.Context) (*github.Client, *store.Store, string, error) {
-	c, err := github.New()
+	c, st, err := setupLocal()
 	if err != nil {
 		return nil, nil, "", err
 	}
-	st, err := openStore()
-	if err != nil {
-		return nil, nil, "", err
-	}
-	_ = ingest.Backfill(st) // one-off cleanup of pre-fix rows
 	viewer, err := c.Viewer(ctx)
 	if err != nil {
 		st.Close()
 		return nil, nil, "", fmt.Errorf("fetching viewer: %w", err)
 	}
 	return c, st, viewer.Login, nil
+}
+
+// setupLocal opens the API client and store with no network round-trip — the
+// fast path for the TUI, which draws from the store first and resolves the
+// viewer in a background sync.
+func setupLocal() (*github.Client, *store.Store, error) {
+	c, err := github.New()
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := openStore()
+	if err != nil {
+		return nil, nil, err
+	}
+	_ = ingest.Backfill(st) // one-off cleanup of pre-fix rows
+	return c, st, nil
 }
 
 func openStore() (*store.Store, error) {
