@@ -5,6 +5,8 @@
 package agent
 
 import (
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -63,16 +65,24 @@ func logPath() string {
 	return filepath.Join(dir, "watchgh", "poller.log")
 }
 
-// writePlist renders the LaunchAgent plist for exe and returns its path. The
-// explicit PATH lets the launchd-spawned poller find `gh` (token) and
-// `terminal-notifier`/`open`, which a bare launchd environment omits.
+// writePlist renders the LaunchAgent plist for exe and returns its path.
 func writePlist(exe string) (string, error) {
 	path := plistPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("creating LaunchAgents dir: %w", err)
 	}
-	log := logPath()
-	body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+	if err := os.WriteFile(path, []byte(renderPlist(exe, logPath())), 0o644); err != nil {
+		return "", fmt.Errorf("writing the LaunchAgent plist: %w", err)
+	}
+	return path, nil
+}
+
+// renderPlist builds the LaunchAgent plist XML for the poller. The explicit PATH
+// lets the launchd-spawned poller find `gh` (token) and `terminal-notifier`/
+// `open`, which a bare launchd environment omits. exe and log are XML-escaped so
+// a path containing '&' or another metacharacter can't produce a malformed plist.
+func renderPlist(exe, log string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -93,11 +103,14 @@ func writePlist(exe string) (string, error) {
     </dict>
 </dict>
 </plist>
-`, Label, exe, log, log)
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return "", fmt.Errorf("writing the LaunchAgent plist: %w", err)
-	}
-	return path, nil
+`, Label, xmlEscape(exe), xmlEscape(log), xmlEscape(log))
+}
+
+// xmlEscape renders s as escaped XML character data (&, <, >, quotes).
+func xmlEscape(s string) string {
+	var b bytes.Buffer
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
 }
 
 // bootstrap loads the plist into the user domain, falling back to the legacy
