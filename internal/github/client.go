@@ -20,8 +20,9 @@ const apiBase = "https://api.github.com"
 
 // Client talks to the GitHub API with a resolved token.
 type Client struct {
-	http  *http.Client
-	token string
+	http    *http.Client
+	token   string
+	baseURL string // API root; overridable in tests, defaults to apiBase
 }
 
 // New resolves a token and returns a Client, or an error explaining how to
@@ -32,8 +33,9 @@ func New() (*Client, error) {
 		return nil, err
 	}
 	return &Client{
-		http:  &http.Client{Timeout: 20 * time.Second},
-		token: token,
+		http:    &http.Client{Timeout: 20 * time.Second},
+		token:   token,
+		baseURL: apiBase,
 	}, nil
 }
 
@@ -57,7 +59,7 @@ func resolveToken() (string, error) {
 // ("/notifications") or an absolute API URL (as returned in payloads).
 func (c *Client) get(ctx context.Context, url string, v any) error {
 	if strings.HasPrefix(url, "/") {
-		url = apiBase + url
+		url = c.baseURL + url
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -86,7 +88,7 @@ func (c *Client) get(ctx context.Context, url string, v any) error {
 // patch performs an authenticated PATCH with no body and discards the response.
 func (c *Client) patch(ctx context.Context, url string) error {
 	if strings.HasPrefix(url, "/") {
-		url = apiBase + url
+		url = c.baseURL + url
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, nil)
 	if err != nil {

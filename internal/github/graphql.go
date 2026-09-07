@@ -25,12 +25,12 @@ type TrackedPR struct {
 	UpdatedAt  time.Time // last PR update, for the Mine-roster row's age
 }
 
+// trackedQuery pages one search (author:@me or assignee:@me) 50 nodes at a time;
+// searchNodes walks pageInfo.endCursor until GitHub reports no next page.
 const trackedQuery = `
-query {
-  mine: search(query: "is:open is:pr author:@me", type: ISSUE, first: 50) {
-    nodes { ...pr }
-  }
-  assigned: search(query: "is:open is:pr assignee:@me", type: ISSUE, first: 50) {
+query($q: String!, $after: String) {
+  search(query: $q, type: ISSUE, first: 50, after: $after) {
+    pageInfo { hasNextPage endCursor }
     nodes { ...pr }
   }
 }
@@ -45,42 +45,35 @@ fragment pr on PullRequest {
 }`
 
 // TrackedPRs fetches the viewer's open + assigned PRs, deduped by repo#number.
+// Both searches paginate fully, so a viewer with more than one page of open or
+// assigned PRs is tracked in full rather than silently truncated at 50.
 func (c *Client) TrackedPRs(ctx context.Context) ([]TrackedPR, error) {
-	var resp struct {
-		Data struct {
-			Mine     searchResult `json:"mine"`
-			Assigned searchResult `json:"assigned"`
-		} `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	if err := c.graphql(ctx, trackedQuery, &resp); err != nil {
+	mine, err := searchNodes[prNode](ctx, c, trackedQuery, "is:open is:pr author:@me")
+	if err != nil {
 		return nil, err
 	}
-	if len(resp.Errors) > 0 {
-		return nil, fmt.Errorf("graphql: %s", resp.Errors[0].Message)
+	assigned, err := searchNodes[prNode](ctx, c, trackedQuery, "is:open is:pr assignee:@me")
+	if err != nil {
+		return nil, err
 	}
 
 	seen := map[string]bool{}
 	var out []TrackedPR
-	for _, n := range append(resp.Data.Mine.Nodes, resp.Data.Assigned.Nodes...) {
-		if n.Number == 0 { // non-PullRequest node
-			continue
+	for _, group := range [][]prNode{mine, assigned} {
+		for _, n := range group {
+			if n.Number == 0 { // non-PullRequest node
+				continue
+			}
+			pr := n.toTrackedPR()
+			key := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, pr)
 		}
-		pr := n.toTrackedPR()
-		key := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, pr)
 	}
 	return out, nil
-}
-
-type searchResult struct {
-	Nodes []prNode `json:"nodes"`
 }
 
 type prNode struct {
@@ -145,8 +138,9 @@ type ReviewState struct {
 }
 
 const reviewedQuery = `
-query {
-  reviewedBy: search(query: "is:open is:pr reviewed-by:@me", type: ISSUE, first: 50) {
+query($q: String!, $after: String) {
+  search(query: $q, type: ISSUE, first: 50, after: $after) {
+    pageInfo { hasNextPage endCursor }
     nodes { ...reviewed }
   }
 }
@@ -160,27 +154,16 @@ fragment reviewed on PullRequest {
 // ReviewStates fetches the viewer's open PRs they've reviewed and reports, for
 // each, whether the latest review is still against the head commit. This is what
 // lets watchgh auto-resolve a review request once you've reviewed the current
-// head and re-surface it when new commits land on top of your review.
+// head and re-surface it when new commits land on top of your review. It pages
+// through every reviewed PR, so a heavy reviewer's requests still auto-resolve
+// past the first 50.
 func (c *Client) ReviewStates(ctx context.Context) ([]ReviewState, error) {
-	var resp struct {
-		Data struct {
-			ReviewedBy struct {
-				Nodes []reviewNode `json:"nodes"`
-			} `json:"reviewedBy"`
-		} `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	if err := c.graphql(ctx, reviewedQuery, &resp); err != nil {
+	nodes, err := searchNodes[reviewNode](ctx, c, reviewedQuery, "is:open is:pr reviewed-by:@me")
+	if err != nil {
 		return nil, err
 	}
-	if len(resp.Errors) > 0 {
-		return nil, fmt.Errorf("graphql: %s", resp.Errors[0].Message)
-	}
-
 	var out []ReviewState
-	for _, n := range resp.Data.ReviewedBy.Nodes {
+	for _, n := range nodes {
 		if rs, ok := n.toReviewState(); ok {
 			out = append(out, rs)
 		}
@@ -224,13 +207,65 @@ func (n reviewNode) toReviewState() (ReviewState, bool) {
 	}, true
 }
 
-// graphql POSTs a query and decodes the response into out.
-func (c *Client) graphql(ctx context.Context, query string, out any) error {
-	body, err := json.Marshal(map[string]string{"query": query})
+// pageInfo is the cursor slice of a GraphQL connection.
+type pageInfo struct {
+	HasNextPage bool   `json:"hasNextPage"`
+	EndCursor   string `json:"endCursor"`
+}
+
+// gqlError is one entry of a GraphQL response's top-level errors array.
+type gqlError struct {
+	Message string `json:"message"`
+}
+
+// searchNodes runs a paginated `search` query for the given search string and
+// returns every node across all pages. query must declare $q and $after and
+// select `search { pageInfo { hasNextPage endCursor } nodes { … } }`. It is a
+// free function (not a method) because Go methods can't take type parameters.
+func searchNodes[N any](ctx context.Context, c *Client, query, q string) ([]N, error) {
+	var all []N
+	after := ""
+	for {
+		var resp struct {
+			Data struct {
+				Search struct {
+					PageInfo pageInfo `json:"pageInfo"`
+					Nodes    []N      `json:"nodes"`
+				} `json:"search"`
+			} `json:"data"`
+			Errors []gqlError `json:"errors"`
+		}
+		vars := map[string]any{"q": q}
+		if after != "" {
+			vars["after"] = after
+		}
+		if err := c.graphql(ctx, query, vars, &resp); err != nil {
+			return nil, err
+		}
+		if len(resp.Errors) > 0 {
+			return nil, fmt.Errorf("graphql: %s", resp.Errors[0].Message)
+		}
+		all = append(all, resp.Data.Search.Nodes...)
+		pi := resp.Data.Search.PageInfo
+		if !pi.HasNextPage || pi.EndCursor == "" {
+			return all, nil
+		}
+		after = pi.EndCursor
+	}
+}
+
+// graphql POSTs a query (with optional variables) and decodes the response into
+// out.
+func (c *Client) graphql(ctx context.Context, query string, vars map[string]any, out any) error {
+	payload := map[string]any{"query": query}
+	if len(vars) > 0 {
+		payload["variables"] = vars
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/graphql", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/graphql", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
