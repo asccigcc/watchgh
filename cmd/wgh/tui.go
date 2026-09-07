@@ -1,8 +1,9 @@
 // The interactive timeline: bare `wgh` on an alt-screen, arrow keys to
 // move, Enter to open (marking read), r to mark read, R to re-sync, q to quit.
-// A background goroutine polls GitHub on a ticker (and on launch and R), writing
-// to the store and posting desktop notifications for actionable events; the view
-// re-reads the store on its own ticker so new events appear live.
+// The view re-reads the store on a ticker so events written by the launchd
+// background poller appear live, and refreshes on launch and R. When that
+// poller isn't running the view self-polls GitHub (and notifies) instead, so a
+// single actor always owns notifications.
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"watchgh/internal/agent"
 	"watchgh/internal/github"
 	"watchgh/internal/ingest"
 	"watchgh/internal/store"
@@ -60,7 +62,16 @@ func runTUI(ctx context.Context) error {
 	// including resolving the token via `gh auth token` — the viewer login, and
 	// the first sync all happen in the background (see run), so nothing off the
 	// machine gates the first paint.
-	return (&tui{ctx: ctx, st: st}).run()
+	t := &tui{ctx: ctx, st: st}
+
+	// Ensure the launchd background poller is installed and running so
+	// notifications keep flowing after this window closes. Best-effort: if it
+	// can't be set up, the view still self-polls while it's open (see run).
+	if err := agent.Ensure(); err != nil {
+		t.status = "⚠ background poller: " + err.Error()
+	}
+	t.daemonUp = agent.Running()
+	return t.run()
 }
 
 type tui struct {
@@ -69,17 +80,18 @@ type tui struct {
 	c      *github.Client
 	viewer string
 
-	all     []timeline.Event // every stored event, newest first (unfiltered)
-	prs     []timeline.Event // Mine tab: one synthesized row per open PR
-	events  []timeline.Event // the active tab's visible rows
-	active  int              // current tab index
-	pos     []int            // remembered selection index, per tab
-	sel     int              // index of the selected row (0 = top = newest)
-	top     int              // index of the first visible row (scroll offset)
-	rows    int              // terminal height
-	cols    int              // terminal width
-	status  string           // footer message (last action + warnings)
-	syncing bool             // a background sync is in flight (shown in the title bar)
+	all      []timeline.Event // every stored event, newest first (unfiltered)
+	prs      []timeline.Event // Mine tab: one synthesized row per open PR
+	events   []timeline.Event // the active tab's visible rows
+	active   int              // current tab index
+	pos      []int            // remembered selection index, per tab
+	sel      int              // index of the selected row (0 = top = newest)
+	top      int              // index of the first visible row (scroll offset)
+	rows     int              // terminal height
+	cols     int              // terminal width
+	status   string           // footer message (last action + warnings)
+	syncing  bool             // a background sync is in flight (shown in the title bar)
+	daemonUp bool             // the launchd poller is running (it owns notifications)
 }
 
 // mineTab is the index of "My PRs" in tabDefs; it is sourced from the open-PR
@@ -121,7 +133,9 @@ func (t *tui) run() error {
 	t.pos = make([]int, len(tabDefs))
 	t.resize()
 	t.reload()
-	t.status = "1-4/⇥ tabs · ↑↓ move · ⏎ open · r read · R sync · q quit"
+	if t.status == "" { // keep any launch warning (e.g. poller install failed)
+		t.status = "1-4/⇥ tabs · ↑↓ move · ⏎ open · r read · R sync · q quit"
+	}
 	t.syncing = true // the launch sync (kicked off below) is already in flight
 	t.draw()
 
@@ -141,10 +155,17 @@ func (t *tui) run() error {
 	tick := time.NewTicker(refreshTick)
 	defer tick.Stop()
 
-	// Poll GitHub in the background on its own cadence so an open wgh stays
-	// fresh and fires desktop notifications without a separate daemon.
-	poll := time.NewTicker(cfg.PollFloor)
-	defer poll.Stop()
+	// When the launchd poller is up it owns polling and notifications, so the
+	// view just re-reads the store it writes (via tick) and refreshes on launch
+	// and R. Only when the poller is down does the view self-poll GitHub — and
+	// then it notifies, so a single actor is ever the notifier. A nil channel
+	// blocks forever, keeping that self-poll path off when the daemon is up.
+	var pollC <-chan time.Time
+	if !t.daemonUp {
+		poll := time.NewTicker(cfg.PollFloor)
+		defer poll.Stop()
+		pollC = poll.C
+	}
 
 	for {
 		select {
@@ -157,7 +178,7 @@ func (t *tui) run() error {
 			if t.reload() {
 				t.draw()
 			}
-		case <-poll.C:
+		case <-pollC:
 			if !t.syncing { // skip if the previous poll is still running
 				t.syncing = true
 				go t.sync(t.c, t.viewer, true, syncDone)
@@ -329,6 +350,7 @@ func (t *tui) applySync(res syncResult) {
 	if res.warn != "" {
 		t.status = res.warn
 	}
+	t.daemonUp = agent.Running() // reflect a poller started/stopped elsewhere
 	t.reload()
 }
 
@@ -536,7 +558,11 @@ func (t *tui) footer() string {
 	if login == "" {
 		login = "…" // not resolved yet; the first background sync fills it in
 	}
-	user := fmt.Sprintf(" @%s ", login)
+	poller := "poller off"
+	if t.daemonUp {
+		poller = "poller on"
+	}
+	user := fmt.Sprintf(" %s · @%s ", poller, login)
 
 	uw := utf8.RuneCountInString(user)
 	if uw > t.cols {

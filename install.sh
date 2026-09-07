@@ -75,4 +75,5 @@ else
 fi
 
 echo
-info "wgh   # open the interactive timeline (polls in the background)"
+info "wgh        # open the timeline; first run installs the background poller"
+info "wgh stop   # stop the background poller"

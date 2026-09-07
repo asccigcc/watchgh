@@ -13,11 +13,12 @@ stale_after = "24h"
 # Read/resolved events older than this are pruned; unread items are never removed.
 retention = "7d"
 
-# Spacing between the background polls wgh runs while it's open. The default is
-# relaxed (5m) since desktop notifications pull you in and `R` forces an
-# on-demand refresh; lower it for snappier updates. Minimum is 60s: the
-# tracked-PR/review GraphQL polls key off this and get no server-side pacing, so
-# anything lower is rejected to stay clear of GitHub's rate limits.
+# Spacing between the background poller's GitHub polls (also the open window's
+# self-poll when the poller isn't running). The default is relaxed (5m) since
+# notifications pull you in and `R` forces an on-demand refresh; lower it for
+# snappier updates. Minimum is 60s: the tracked-PR/review GraphQL polls key off
+# this and get no server-side pacing, so anything lower is rejected to stay
+# clear of GitHub's rate limits.
 poll_floor = "5m"
 
 # Desktop-notify only actionable events (review requested, assigned, changes

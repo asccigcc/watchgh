@@ -1,10 +1,11 @@
 # watchgh
 
 A GitHub activity timeline for your terminal: the PRs, reviews, and CI runs that
-need you, in the order they arrive. `wgh` shows the timeline in your terminal,
-polls GitHub in the background while it's open, and posts desktop notifications
-for actionable events. Auth piggybacks on your credentials (`GITHUB_TOKEN` if
-set, otherwise `gh auth token`).
+need you, in the order they arrive. `wgh` shows the timeline in your terminal
+and installs a launchd background poller that keeps GitHub in sync and posts
+desktop notifications for actionable events, even when no window is open. Auth
+piggybacks on your credentials (`GITHUB_TOKEN` if set, otherwise
+`gh auth token`).
 
 ## Install
 
@@ -28,15 +29,18 @@ BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
 wgh          # interactive timeline (prints plain text when piped)
 wgh open 42  # open item 42 in the browser, mark read (here + GitHub)
 wgh read 42  # mark item 42 read without opening
+wgh stop     # stop the background poller (restarts next time you open wgh)
 ```
 
 ## Interactive timeline
 
 Bare `wgh` in a terminal opens a full-screen timeline; piped or redirected, it
-prints plain text so scripts keep working. It polls GitHub in the background on
-the poll-floor cadence (and on launch, and on `R`), writing to a local store it
-re-reads every couple of seconds so new events appear live. A `⟳ syncing` marker
-in the title bar shows when a poll is in flight. Four tabs, with live counts:
+prints plain text so scripts keep working. It re-reads the local store every
+couple of seconds so events the background poller writes appear live, and
+refreshes on launch and on `R`. A `⟳ syncing` marker in the title bar shows a
+sync in flight; the footer shows whether the background poller is on. (If the
+poller isn't running, the open window polls GitHub itself.) Four tabs, with live
+counts:
 
 | Tab | Shows |
 | --- | --- |
@@ -56,14 +60,27 @@ in the title bar shows when a poll is in flight. Four tabs, with live counts:
 | R | poll GitHub now |
 | q / Esc / Ctrl-C | quit |
 
-## Notifications
+## Background poller
 
-While `wgh` is open it posts a desktop notification for each freshly-arrived
-actionable event (review requested, assigned, changes requested, CI failed). The
-launch sync is silent so you aren't alerted about the existing backlog, and a
-manual `R` is silent too since you're already looking. CI and blocked events come
-from a GraphQL poll of your open and assigned PRs, firing only on state
-transitions.
+The first time you open `wgh` it installs a launchd agent
+(`com.watchgh.poller`) that runs `wgh` headless in the background. launchd keeps
+it alive across logins and reboots, so it polls GitHub on the poll-floor cadence
+and posts desktop notifications for actionable events (review requested,
+assigned, changes requested, CI failed) even when no window is open. Its first
+pass is silent so a cold start doesn't alert on the whole backlog; after that
+only genuinely new events notify. CI and blocked events come from a GraphQL poll
+of your open and assigned PRs, firing only on state transitions.
+
+```sh
+wgh stop   # unload the poller and remove its agent
+wgh        # opening wgh again re-installs and starts it
+```
+
+Notification delivery uses `terminal-notifier` if installed (click to open the
+item), otherwise the built-in `osascript`. Because the poller runs under
+launchd — which starts with a minimal environment — it resolves your token via
+`gh auth token`; make sure the GitHub CLI is authenticated (`gh auth login`).
+Its output goes to `~/Library/Application Support/watchgh/poller.log`.
 
 ## Configuration
 

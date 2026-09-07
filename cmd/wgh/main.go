@@ -1,7 +1,8 @@
 // Command wgh shows GitHub activity you care about as an arrival-ordered
 // timeline: notifications (reviews/assigns/comments) plus tracked-PR CI and
-// merge-state transitions. The interactive view polls GitHub in the background
-// and posts desktop notifications for actionable events while it's open.
+// merge-state transitions. Opening wgh installs a launchd background poller
+// that keeps GitHub in sync and posts desktop notifications even when no window
+// is open; `wgh stop` tears it down.
 package main
 
 import (
@@ -15,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"watchgh/internal/agent"
 	"watchgh/internal/config"
 	"watchgh/internal/github"
 	"watchgh/internal/ingest"
@@ -62,6 +64,11 @@ func main() {
 		err = runMark(ctx, args, true)
 	case "read":
 		err = runMark(ctx, args, false)
+	case "stop":
+		err = runStop()
+	case "__poll":
+		// Hidden: the headless loop launchd runs as the background poller.
+		err = runPoll(ctx)
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -82,10 +89,21 @@ Usage:
   wgh               Interactive timeline (arrows/⏎/r/q); prints plain when piped
   wgh open <n>      Open item <n> in the browser and mark it read (here + GitHub)
   wgh read <n>      Mark item <n> read without opening
+  wgh stop          Stop the background poller (it restarts next time you open wgh)
   wgh help          Show this help
 
-The interactive timeline polls GitHub in the background and posts desktop
-notifications for actionable events while it's open.`)
+Opening wgh installs a launchd background poller that keeps GitHub in sync and
+posts desktop notifications for actionable events, even when no window is open.`)
+}
+
+// runStop tears down the background poller. Stopping one that isn't running is
+// a no-op, not an error.
+func runStop() error {
+	if err := agent.Stop(); err != nil {
+		return err
+	}
+	fmt.Println("✓ background poller stopped")
+	return nil
 }
 
 func runList(ctx context.Context) error {
