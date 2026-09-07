@@ -37,8 +37,9 @@ type Event struct {
 	Detail     string // actor + action, or CI summary
 	URL        string // web URL for the PR (OSC 8 target)
 	Unread     bool
-	Actionable bool // drives the stale "!" gutter and retention protection
-	IsMine     bool // author == viewer -> AUTHOR renders as dim em-dash
+	Actionable bool   // drives the stale "!" gutter and retention protection
+	IsMine     bool   // author == viewer -> AUTHOR renders as dim em-dash
+	CIState    string // current CI rollup for My-PRs roster rows (drives the CI glyph); "" elsewhere
 }
 
 // Badge describes the colored badge cell for a Kind.

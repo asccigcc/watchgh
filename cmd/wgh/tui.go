@@ -314,12 +314,16 @@ func (t *tui) act(open bool) {
 	t.reload()
 }
 
-// syncResult carries a finished background sync back to the main loop, which
-// owns every tui field — so the sync goroutine never writes the view directly.
+// syncResult carries a background sync back to the main loop, which owns every
+// tui field — so the sync goroutine never writes the view directly. The first
+// run emits two: an early partial the moment the client and viewer login are
+// resolved (so the footer stops showing @… without waiting out the full poll),
+// then the final one when the notification/PR/review sync completes.
 type syncResult struct {
-	client *github.Client // the built client (nil unless this run created it)
-	viewer string         // the resolved login (empty when already known or on failure)
-	warn   string         // footer warning; empty on success (a clean sync stays silent)
+	client  *github.Client // the built client (nil unless this run created it)
+	viewer  string         // the resolved login (empty when already known or on failure)
+	warn    string         // footer warning; empty on success (a clean sync stays silent)
+	partial bool           // client/viewer only — the full sync is still running
 }
 
 // sync polls GitHub once off the input path — building the client (which
@@ -328,13 +332,14 @@ type syncResult struct {
 // fold in. The store it writes is what the next reload picks up. When notify is
 // set it posts desktop notifications for freshly-arrived actionable events.
 func (t *tui) sync(c *github.Client, viewer string, notify bool, done chan<- syncResult) {
+	fresh := false // did this run resolve the client or viewer for the first time?
 	if c == nil {
 		nc, err := github.New()
 		if err != nil {
 			done <- syncResult{warn: "⚠ " + err.Error()}
 			return
 		}
-		c = nc
+		c, fresh = nc, true
 	}
 	if viewer == "" {
 		v, err := c.Viewer(t.ctx)
@@ -342,7 +347,14 @@ func (t *tui) sync(c *github.Client, viewer string, notify bool, done chan<- syn
 			done <- syncResult{client: c, warn: "⚠ sync: " + err.Error()}
 			return
 		}
-		viewer = v.Login
+		viewer, fresh = v.Login, true
+	}
+	// Paint the resolved client and login right away — the footer shows @… until
+	// this lands — rather than holding them behind the poll below. Buffered(1)
+	// done plus the send-blocks-until-received handoff guarantees the main loop
+	// sees this partial before the final result.
+	if fresh {
+		done <- syncResult{client: c, viewer: viewer, partial: true}
 	}
 	nf, nerr := syncNotifications(t.ctx, c, t.st, viewer)
 	tf, terr := syncTracked(t.ctx, c, t.st, viewer)
@@ -371,17 +383,21 @@ func syncWarning(nerr, terr, rerr error) string {
 	}
 }
 
-// applySync folds a finished background sync into the view: clear the syncing
-// marker, cache the built client and resolved viewer login so later syncs reuse
-// them, surface any warning (a clean sync stays silent), and re-read the store.
+// applySync folds a background sync into the view. A partial result only caches
+// the built client and resolved login (painting the footer immediately) and
+// leaves the syncing marker up. The final result clears the marker, surfaces any
+// warning (a clean sync stays silent), and re-reads the store.
 func (t *tui) applySync(res syncResult) {
-	t.syncing = false
 	if res.client != nil {
 		t.c = res.client
 	}
 	if res.viewer != "" {
 		t.viewer = res.viewer
 	}
+	if res.partial {
+		return // client/viewer painted; the full sync is still in flight
+	}
+	t.syncing = false
 	if res.warn != "" {
 		t.status = res.warn
 	}
@@ -452,6 +468,7 @@ func (m *model) roster() []timeline.Event {
 	out := make([]timeline.Event, 0, len(prs))
 	for _, pr := range prs {
 		if e, ok := latest[pr.Key]; ok {
+			e.CIState = pr.CIState // carry current CI onto the activity row so the glyph reflects now, not the event
 			out = append(out, e)
 		} else {
 			out = append(out, synthPR(pr))
@@ -476,21 +493,22 @@ func latestMineByPR(all []timeline.Event) map[string]timeline.Event {
 	return m
 }
 
-// synthPR renders an open PR that has no timeline event yet as a status row:
-// the CI/merge state picks the badge; attention states (blocked, CI failed) pop
-// as unread while healthy PRs stay quiet.
+// synthPR renders an open PR that has no timeline event yet as a status row.
+// The badge carries the merge/attention state (blocked vs. plain open PR); CI
+// health rides its own glyph column (Event.CIState), so a passing-but-blocked PR
+// shows both. Attention states (blocked, CI failed) pop as unread; healthy PRs
+// stay quiet.
 func synthPR(pr store.OpenPR) timeline.Event {
 	e := timeline.Event{
 		Source: "graphql", Repo: pr.Repo, Number: pr.Number, URL: pr.URL,
 		TS: pr.UpdatedAt, IsMine: true, Detail: pr.Title, Kind: timeline.KindOpenPR,
+		CIState: pr.CIState,
 	}
 	switch {
 	case pr.MergeState == "BLOCKED" || pr.MergeState == "DIRTY":
 		e.Kind, e.Unread, e.Actionable = timeline.KindBlocked, true, true
 	case pr.CIState == "FAILURE" || pr.CIState == "ERROR":
-		e.Kind, e.Unread, e.Actionable = timeline.KindCIFailed, true, true
-	case pr.CIState == "SUCCESS":
-		e.Kind = timeline.KindCIPassed
+		e.Unread, e.Actionable = true, true // red CI glyph carries the why; flag for attention
 	}
 	return e
 }
@@ -631,7 +649,7 @@ func (t *tui) footer() string {
 // plain on the grey highlight background across the full width; others reuse the
 // colored CLI renderer.
 func (t *tui) rowText(e timeline.Event, selected bool) string {
-	o := timeline.RenderOpts{Now: time.Now(), StaleAfter: cfg.StaleAfter, Color: !selected, LeadWithPR: true}
+	o := timeline.RenderOpts{Now: time.Now(), StaleAfter: cfg.StaleAfter, Color: !selected, LeadWithPR: true, ShowCI: t.active == mineTab}
 	row := timeline.RenderRow(e, o)
 	if selected {
 		return stySelect + padANSI(row, t.cols) + reset

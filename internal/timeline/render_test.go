@@ -35,6 +35,35 @@ func TestShortRef(t *testing.T) {
 	}
 }
 
+func TestShowCIRendersGlyphIndependentOfBadge(t *testing.T) {
+	now := time.Now()
+	e := Event{Kind: KindBlocked, Repo: "acme/api", Number: 1, TS: now, CIState: "SUCCESS", IsMine: true}
+
+	// With ShowCI the row carries the green ✓ CI glyph next to the ⊘ block badge —
+	// the two dimensions read independently.
+	got := renderRow(e, RenderOpts{LeadWithPR: true, Now: now, ShowCI: true})
+	if !strings.Contains(got, "✓") || !strings.Contains(got, "⊘") {
+		t.Errorf("ShowCI row missing CI glyph or block badge: %q", got)
+	}
+
+	// Without ShowCI (other tabs) the CI glyph column is absent.
+	if off := renderRow(e, RenderOpts{LeadWithPR: true, Now: now}); strings.Contains(off, "✓") {
+		t.Errorf("CI glyph leaked into a non-ShowCI row: %q", off)
+	}
+}
+
+func TestCIGlyph(t *testing.T) {
+	cases := map[string]string{
+		"SUCCESS": "✓", "FAILURE": "✗", "ERROR": "✗",
+		"PENDING": "●", "EXPECTED": "●", "": "○", "UNKNOWN": "○",
+	}
+	for state, want := range cases {
+		if g, _ := ciGlyph(state); g != want {
+			t.Errorf("ciGlyph(%q) = %q, want %q", state, g, want)
+		}
+	}
+}
+
 func TestRelative(t *testing.T) {
 	cases := map[time.Duration]string{
 		30 * time.Second: "now",

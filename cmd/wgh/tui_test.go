@@ -207,15 +207,31 @@ func TestRecountMatchesFiltersAndRoster(t *testing.T) {
 	}
 }
 
+func TestApplySyncPartialPaintsViewerButKeepsSyncing(t *testing.T) {
+	// The early partial result should surface the resolved login right away
+	// while leaving the syncing marker up — it must not clear syncing or (since
+	// there's no store here) attempt a reload.
+	tui := &tui{syncing: true}
+	tui.applySync(syncResult{viewer: "octocat", partial: true})
+	if tui.viewer != "octocat" {
+		t.Errorf("viewer = %q, want octocat", tui.viewer)
+	}
+	if !tui.syncing {
+		t.Error("partial result should leave syncing marker up")
+	}
+}
+
 func TestSynthPR(t *testing.T) {
-	if e := synthPR(store.OpenPR{MergeState: "BLOCKED"}); e.Kind != timeline.KindBlocked || !e.Unread {
-		t.Errorf("blocked PR: got kind %v unread %v, want KindBlocked+unread", e.Kind, e.Unread)
+	// The badge now carries merge/attention state; CI health rides CIState (the
+	// glyph column), so the two dimensions are independent on a synth row.
+	if e := synthPR(store.OpenPR{MergeState: "BLOCKED", CIState: "SUCCESS"}); e.Kind != timeline.KindBlocked || !e.Unread || e.CIState != "SUCCESS" {
+		t.Errorf("blocked+green: got kind %v unread %v ci %q, want KindBlocked+unread and CIState SUCCESS", e.Kind, e.Unread, e.CIState)
 	}
-	if e := synthPR(store.OpenPR{CIState: "FAILURE"}); e.Kind != timeline.KindCIFailed || !e.Actionable {
-		t.Errorf("failed CI: got kind %v actionable %v, want KindCIFailed+actionable", e.Kind, e.Actionable)
+	if e := synthPR(store.OpenPR{CIState: "FAILURE"}); e.Kind != timeline.KindOpenPR || !e.Actionable || e.CIState != "FAILURE" {
+		t.Errorf("failed CI (not blocked): got kind %v actionable %v ci %q, want KindOpenPR+actionable and CIState FAILURE", e.Kind, e.Actionable, e.CIState)
 	}
-	if e := synthPR(store.OpenPR{CIState: "SUCCESS"}); e.Kind != timeline.KindCIPassed || e.Unread {
-		t.Errorf("healthy PR: got kind %v unread %v, want KindCIPassed and not unread", e.Kind, e.Unread)
+	if e := synthPR(store.OpenPR{CIState: "SUCCESS"}); e.Kind != timeline.KindOpenPR || e.Unread || e.CIState != "SUCCESS" {
+		t.Errorf("healthy PR: got kind %v unread %v ci %q, want KindOpenPR, not unread, CIState SUCCESS", e.Kind, e.Unread, e.CIState)
 	}
 	if e := synthPR(store.OpenPR{Title: "wip"}); e.Kind != timeline.KindOpenPR || e.Detail != "wip" {
 		t.Errorf("quiet PR: got kind %v detail %q, want KindOpenPR + title", e.Kind, e.Detail)

@@ -30,6 +30,7 @@ type RenderOpts struct {
 	Color      bool          // emit ANSI colors
 	Hyperlinks bool          // emit OSC 8 hyperlinks (else append a raw URL)
 	LeadWithPR bool          // lead with the PR number + bare repo name (TUI) instead of seq + repo#num (list, which opens by seq)
+	ShowCI     bool          // render a CI-health glyph column (My-PRs tab), driven by Event.CIState
 	Now        time.Time     // reference time for relative timestamps
 	StaleAfter time.Duration // DUE threshold; zero falls back to defaultStaleAfter
 }
@@ -79,6 +80,15 @@ func renderRow(e Event, o RenderOpts) string {
 	// TIME (relative, right-aligned in 5).
 	age := padLeft(relative(o.Now.Sub(e.TS)), 5)
 
+	// CI glyph (My-PRs tab only): current CI health as its own column so it reads
+	// independently of the merge-state badge — a passing-but-blocked PR shows a
+	// green ✓ next to the ⊘ block badge. Empty when ShowCI is off.
+	ci := ""
+	if o.ShowCI {
+		g, gc := ciGlyph(e.CIState)
+		ci = colorize(g, gc, o.Color) + "  "
+	}
+
 	// BADGE (glyph + label, colored, padded to visible width 8).
 	badge := e.Kind.Badge()
 	badgeCell := colorize(padRight(badge.Glyph+" "+badge.Label, 8), badge.Color, o.Color)
@@ -102,8 +112,8 @@ func renderRow(e Event, o RenderOpts) string {
 	authorText = truncate(authorText, 11)
 	author := colorizeIf(e.IsMine, padRight(authorText, 11), colDim, o.Color)
 
-	row := fmt.Sprintf("%s%s %s  %s  %s  %s  %s",
-		lead, gutter, age, badgeCell, ref, author, e.Detail)
+	row := fmt.Sprintf("%s%s %s  %s%s  %s  %s  %s",
+		lead, gutter, age, ci, badgeCell, ref, author, e.Detail)
 
 	// Read/history rows dim as a freshness cue.
 	if !e.Unread && o.Color {
@@ -130,6 +140,22 @@ func gutterMark(e Event, now time.Time, staleAfter time.Duration) (string, color
 		return "NEW", colBlue
 	}
 	return "", ""
+}
+
+// ciGlyph maps a CI rollup state to a single-cell health glyph and its color:
+// ✓ green (passed), ✗ red (failed/errored), ● yellow (still running), ○ dim
+// (no checks or not yet known). Reserved to one cell so the column stays aligned.
+func ciGlyph(state string) (string, color) {
+	switch state {
+	case "SUCCESS":
+		return "✓", colGreen
+	case "FAILURE", "ERROR":
+		return "✗", colRed
+	case "PENDING", "EXPECTED":
+		return "●", colYellow
+	default:
+		return "○", colDim
+	}
 }
 
 // Relative renders a compact human age ("now", "5m", "3h", "2d"), exported for
