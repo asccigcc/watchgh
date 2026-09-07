@@ -44,6 +44,7 @@ const (
 	styChrome = "\x1b[48;5;24;97m"  // blue — title bar + footer status bar
 	stySelect = "\x1b[48;5;238;97m" // grey — the selected row
 	styTab    = "\x1b[48;5;53;97m"  // magenta — the active tab chip
+	styOK     = "\x1b[32m"          // green — the "poller live" status dot
 )
 
 // refreshTick is how often the viewer re-reads the store to pick up events the
@@ -547,7 +548,8 @@ func (t *tui) header() string {
 }
 
 // footer is a status bar: keybinds + position on the blue chrome background,
-// with the viewer login trailing plain (no background) at the right edge.
+// with the poller status dot and viewer login trailing plain (no background) at
+// the right edge.
 func (t *tui) footer() string {
 	pos := ""
 	if len(t.events) > 0 {
@@ -558,18 +560,25 @@ func (t *tui) footer() string {
 	if login == "" {
 		login = "…" // not resolved yet; the first background sync fills it in
 	}
-	poller := "poller off"
-	if t.daemonUp {
-		poller = "poller on"
-	}
-	user := fmt.Sprintf(" %s · @%s ", poller, login)
 
-	uw := utf8.RuneCountInString(user)
+	// Background-poller state as a status dot (the systemctl convention): a
+	// green ● live when the launchd poller is running, a dim ○ off when not.
+	glyph, word, dot := "○", "off ", dimSeq
+	if t.daemonUp {
+		glyph, word, dot = "●", "live", styOK
+	}
+
+	// Width is measured on the plain text; the colored dot is rendered
+	// separately so padANSI's rune count stays accurate.
+	plain := fmt.Sprintf(" %s %s @%s ", glyph, word, login)
+	uw := utf8.RuneCountInString(plain)
 	if uw > t.cols {
 		uw = t.cols
 	}
+	user := dot + glyph + reset + dimSeq + fmt.Sprintf(" %s @%s ", word, login) + reset
+
 	bar := styChrome + padANSI(status, t.cols-uw) + reset
-	return bar + dimSeq + padANSI(user, uw) + reset
+	return bar + dimSeq + " " + reset + truncateANSI(user, uw-1)
 }
 
 // rowText renders one timeline row to fit the width. The selected row is drawn
