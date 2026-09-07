@@ -57,7 +57,7 @@ func runTUI(ctx context.Context) error {
 		return err
 	}
 	defer st.Close()
-	_ = ingest.Backfill(st) // one-off cleanup of pre-fix rows
+	_ = ingest.Backfill(ctx, st) // one-off cleanup of pre-fix rows
 
 	// Only the store is opened up front (local, instant). The GitHub client —
 	// including resolving the token via `gh auth token` — the viewer login, and
@@ -338,7 +338,7 @@ func (t *tui) sync(c *github.Client, viewer string, notify bool, done chan<- syn
 	nf, nerr := syncNotifications(t.ctx, c, t.st, viewer)
 	tf, terr := syncTracked(t.ctx, c, t.st, viewer)
 	rerr := syncReviews(t.ctx, c, t.st)
-	t.st.Prune(cfg.Retention)
+	t.st.Prune(t.ctx, cfg.Retention)
 	// Only the timer-driven poll notifies: on launch we'd alert on the whole
 	// backlog, and on a manual R you're already looking at the screen.
 	if notify {
@@ -383,7 +383,7 @@ func (t *tui) applySync(res syncResult) {
 // reload re-reads the store (newest first) and reports whether the visible set
 // changed, so the ticker only repaints when there's something new.
 func (t *tui) reload() bool {
-	stored, err := t.st.List()
+	stored, err := t.st.List(t.ctx)
 	if err != nil {
 		t.status = "⚠ " + err.Error()
 		return false
@@ -424,7 +424,7 @@ func (t *tui) applyFilter() {
 // mineRoster builds one row per open PR: its latest activity event when there
 // is one, otherwise a synthesized status row so silent PRs still appear.
 func (t *tui) mineRoster() []timeline.Event {
-	prs, err := t.st.OpenPRs()
+	prs, err := t.st.OpenPRs(t.ctx)
 	if err != nil {
 		return nil
 	}

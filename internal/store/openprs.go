@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // OpenPR is a snapshot of one of the viewer's open PRs, kept as a roster so the
 // Mine tab can list every open PR — even one with no timeline activity yet.
@@ -19,9 +22,9 @@ type OpenPR struct {
 
 // SetOpenPR upserts one PR into the roster, stamping last_seen so a later
 // ReconcileOpenPRs can drop rows for PRs that have since closed.
-func (s *Store) SetOpenPR(pr OpenPR) error {
+func (s *Store) SetOpenPR(ctx context.Context, pr OpenPR) error {
 	now := time.Now().Unix()
-	_, err := s.db.Exec(`
+	_, err := s.db.ExecContext(ctx, `
 INSERT INTO open_prs
   (pr_key, repo, number, title, url, author, is_draft, ci_state, merge_state, updated_at, last_seen)
 VALUES (?,?,?,?,?,?,?,?,?,?,?)
@@ -38,19 +41,19 @@ ON CONFLICT(pr_key) DO UPDATE SET
 // ReconcileOpenPRs drops roster rows whose key isn't in the current poll — i.e.
 // PRs that have merged or closed since we last saw them. One set-based DELETE;
 // an empty active set means the viewer has no open PRs, so the roster is cleared.
-func (s *Store) ReconcileOpenPRs(activeKeys map[string]bool) error {
+func (s *Store) ReconcileOpenPRs(ctx context.Context, activeKeys map[string]bool) error {
 	if len(activeKeys) == 0 {
-		_, err := s.db.Exec(`DELETE FROM open_prs`)
+		_, err := s.db.ExecContext(ctx, `DELETE FROM open_prs`)
 		return err
 	}
 	ph, args := keyArgs(activeKeys)
-	_, err := s.db.Exec(`DELETE FROM open_prs WHERE pr_key NOT IN (`+ph+`)`, args...)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM open_prs WHERE pr_key NOT IN (`+ph+`)`, args...)
 	return err
 }
 
 // OpenPRs returns the current roster, most recently updated first.
-func (s *Store) OpenPRs() ([]OpenPR, error) {
-	rows, err := s.db.Query(`
+func (s *Store) OpenPRs(ctx context.Context) ([]OpenPR, error) {
+	rows, err := s.db.QueryContext(ctx, `
 SELECT pr_key, repo, number, title, url, author, is_draft, ci_state, merge_state, updated_at
 FROM open_prs ORDER BY updated_at DESC`)
 	if err != nil {

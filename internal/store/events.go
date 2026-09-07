@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"time"
@@ -23,13 +24,13 @@ ON CONFLICT(id) DO UPDATE SET
 // execer is the write surface shared by *sql.DB and *sql.Tx, so one upsert body
 // serves both the single and batched paths.
 type execer interface {
-	Exec(query string, args ...any) (sql.Result, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
 // upsertEvent runs upsertEventSQL against ex (a DB or an open transaction).
-func upsertEvent(ex execer, e timeline.Event) error {
+func upsertEvent(ctx context.Context, ex execer, e timeline.Event) error {
 	now := time.Now().Unix()
-	_, err := ex.Exec(upsertEventSQL,
+	_, err := ex.ExecContext(ctx, upsertEventSQL,
 		e.ID, e.ThreadID, e.Source, e.TS.Unix(), int(e.Kind), e.Repo, e.Number,
 		e.Author, e.Detail, e.URL, boolToInt(e.Unread), boolToInt(e.Actionable),
 		boolToInt(e.IsMine), now, now)
@@ -37,17 +38,19 @@ func upsertEvent(ex execer, e timeline.Event) error {
 }
 
 // Upsert inserts or refreshes a single event.
-func (s *Store) Upsert(e timeline.Event) error { return upsertEvent(s.db, e) }
+func (s *Store) Upsert(ctx context.Context, e timeline.Event) error {
+	return upsertEvent(ctx, s.db, e)
+}
 
 // UpsertAll upserts a batch in one transaction.
-func (s *Store) UpsertAll(events []timeline.Event) error {
-	tx, err := s.db.Begin()
+func (s *Store) UpsertAll(ctx context.Context, events []timeline.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	for _, e := range events {
-		if err := upsertEvent(tx, e); err != nil {
+		if err := upsertEvent(ctx, tx, e); err != nil {
 			return err
 		}
 	}
@@ -84,8 +87,8 @@ func scanEvent(sc rowScanner) (timeline.Event, error) {
 }
 
 // List returns all stored events oldest-first.
-func (s *Store) List() ([]timeline.Event, error) {
-	rows, err := s.db.Query(`SELECT ` + eventColumns + ` FROM events ORDER BY ts ASC`)
+func (s *Store) List(ctx context.Context) ([]timeline.Event, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+eventColumns+` FROM events ORDER BY ts ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -103,17 +106,17 @@ func (s *Store) List() ([]timeline.Event, error) {
 }
 
 // Get returns a single event by its local seq.
-func (s *Store) Get(seq int64) (timeline.Event, error) {
-	return scanEvent(s.db.QueryRow(`SELECT `+eventColumns+` FROM events WHERE seq=?`, seq))
+func (s *Store) Get(ctx context.Context, seq int64) (timeline.Event, error) {
+	return scanEvent(s.db.QueryRowContext(ctx, `SELECT `+eventColumns+` FROM events WHERE seq=?`, seq))
 }
 
 // GetByID returns a single event by its dedupe id (with its assigned seq).
-func (s *Store) GetByID(id string) (timeline.Event, error) {
-	return scanEvent(s.db.QueryRow(`SELECT `+eventColumns+` FROM events WHERE id=?`, id))
+func (s *Store) GetByID(ctx context.Context, id string) (timeline.Event, error) {
+	return scanEvent(s.db.QueryRowContext(ctx, `SELECT `+eventColumns+` FROM events WHERE id=?`, id))
 }
 
 // ExistingIDs returns the subset of ids already present in the store.
-func (s *Store) ExistingIDs(ids []string) (map[string]bool, error) {
+func (s *Store) ExistingIDs(ctx context.Context, ids []string) (map[string]bool, error) {
 	found := make(map[string]bool, len(ids))
 	if len(ids) == 0 {
 		return found, nil
@@ -127,7 +130,7 @@ func (s *Store) ExistingIDs(ids []string) (map[string]bool, error) {
 		placeholders = append(placeholders, '?')
 		args[i] = id
 	}
-	rows, err := s.db.Query(`SELECT id FROM events WHERE id IN (`+string(placeholders)+`)`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM events WHERE id IN (`+string(placeholders)+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -143,8 +146,8 @@ func (s *Store) ExistingIDs(ids []string) (map[string]bool, error) {
 }
 
 // MarkRead records a local read timestamp for an event (idempotent).
-func (s *Store) MarkRead(seq int64) error {
-	_, err := s.db.Exec(`UPDATE events SET read_at=? WHERE seq=? AND read_at IS NULL`,
+func (s *Store) MarkRead(ctx context.Context, seq int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE events SET read_at=? WHERE seq=? AND read_at IS NULL`,
 		time.Now().Unix(), seq)
 	return err
 }
@@ -153,22 +156,22 @@ func (s *Store) MarkRead(seq int64) error {
 // event whose thread is no longer in the current unread set is marked read on
 // GitHub's side. It runs as a single set-based UPDATE — with no active threads,
 // every such event is stale, so the NOT IN filter drops away entirely.
-func (s *Store) ReconcileNotifications(activeThreadIDs map[string]bool) error {
+func (s *Store) ReconcileNotifications(ctx context.Context, activeThreadIDs map[string]bool) error {
 	const base = `UPDATE events SET github_unread=0 WHERE source='notification' AND github_unread=1`
 	if len(activeThreadIDs) == 0 {
-		_, err := s.db.Exec(base)
+		_, err := s.db.ExecContext(ctx, base)
 		return err
 	}
 	ph, args := keyArgs(activeThreadIDs)
-	_, err := s.db.Exec(base+` AND thread_id NOT IN (`+ph+`)`, args...)
+	_, err := s.db.ExecContext(ctx, base+` AND thread_id NOT IN (`+ph+`)`, args...)
 	return err
 }
 
 // Prune removes read/resolved events older than maxAge, never touching items
 // that are still unread.
-func (s *Store) Prune(maxAge time.Duration) error {
+func (s *Store) Prune(ctx context.Context, maxAge time.Duration) error {
 	cutoff := time.Now().Add(-maxAge).Unix()
-	_, err := s.db.Exec(
+	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM events WHERE last_seen < ? AND (read_at IS NOT NULL OR github_unread=0)`,
 		cutoff)
 	return err
@@ -178,7 +181,7 @@ func (s *Store) Prune(maxAge time.Duration) error {
 // tokens (keys) to its mapped phrase (value) in a single UPDATE. It's a one-off
 // cleanup for events saved before the classifier stopped echoing GitHub's raw
 // notification reason; idempotent, so re-running it touches nothing.
-func (s *Store) BackfillDetails(m map[string]string) error {
+func (s *Store) BackfillDetails(ctx context.Context, m map[string]string) error {
 	if len(m) == 0 {
 		return nil
 	}
@@ -194,7 +197,7 @@ func (s *Store) BackfillDetails(m map[string]string) error {
 		ph = append(ph, "?")
 	}
 	q.WriteString(" END WHERE detail IN (" + strings.Join(ph, ",") + ")")
-	_, err := s.db.Exec(q.String(), append(whenArgs, inArgs...)...)
+	_, err := s.db.ExecContext(ctx, q.String(), append(whenArgs, inArgs...)...)
 	return err
 }
 
@@ -212,15 +215,15 @@ type ReviewState struct {
 // Inbox); one whose review has gone stale — new commits pushed on top of it — is
 // re-surfaced (marked unread again). Only KindReviewRequested rows are touched;
 // PRs the viewer hasn't reviewed produce no verdict and are left as they are.
-func (s *Store) ReconcileReviewRequests(states []ReviewState) error {
+func (s *Store) ReconcileReviewRequests(ctx context.Context, states []ReviewState) error {
 	for _, rs := range states {
 		var err error
 		if rs.AtHead {
-			_, err = s.db.Exec(
+			_, err = s.db.ExecContext(ctx,
 				`UPDATE events SET read_at=? WHERE kind=? AND repo=? AND number=? AND read_at IS NULL`,
 				time.Now().Unix(), int(timeline.KindReviewRequested), rs.Repo, rs.Number)
 		} else {
-			_, err = s.db.Exec(
+			_, err = s.db.ExecContext(ctx,
 				`UPDATE events SET read_at=NULL, github_unread=1 WHERE kind=? AND repo=? AND number=?`,
 				int(timeline.KindReviewRequested), rs.Repo, rs.Number)
 		}

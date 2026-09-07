@@ -1,12 +1,17 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"watchgh/internal/timeline"
 )
+
+// bg is the context every store call in these tests threads through; the store
+// itself imposes no deadline, so a plain background context is all they need.
+var bg = context.Background()
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
@@ -28,20 +33,20 @@ func ev(id, threadID string, unread bool) timeline.Event {
 
 func TestUpsertDedupesAndAssignsStableSeq(t *testing.T) {
 	s := testStore(t)
-	if err := s.Upsert(ev("a", "t1", true)); err != nil {
+	if err := s.Upsert(bg, ev("a", "t1", true)); err != nil {
 		t.Fatal(err)
 	}
-	first, _ := s.List()
+	first, _ := s.List(bg)
 	if len(first) != 1 {
 		t.Fatalf("want 1 event, got %d", len(first))
 	}
 	seq := first[0].Seq
 
 	// Re-upsert same id: no duplicate, same seq.
-	if err := s.Upsert(ev("a", "t1", true)); err != nil {
+	if err := s.Upsert(bg, ev("a", "t1", true)); err != nil {
 		t.Fatal(err)
 	}
-	again, _ := s.List()
+	again, _ := s.List(bg)
 	if len(again) != 1 || again[0].Seq != seq {
 		t.Fatalf("dedupe failed: %d rows, seq %d != %d", len(again), again[0].Seq, seq)
 	}
@@ -49,15 +54,15 @@ func TestUpsertDedupesAndAssignsStableSeq(t *testing.T) {
 
 func TestMarkReadClearsUnread(t *testing.T) {
 	s := testStore(t)
-	s.Upsert(ev("a", "t1", true))
-	got, _ := s.List()
+	s.Upsert(bg, ev("a", "t1", true))
+	got, _ := s.List(bg)
 	if !got[0].Unread {
 		t.Fatal("expected unread before MarkRead")
 	}
-	if err := s.MarkRead(got[0].Seq); err != nil {
+	if err := s.MarkRead(bg, got[0].Seq); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = s.List()
+	got, _ = s.List(bg)
 	if got[0].Unread {
 		t.Fatal("expected read after MarkRead")
 	}
@@ -65,14 +70,14 @@ func TestMarkReadClearsUnread(t *testing.T) {
 
 func TestReconcileMarksAbsentThreadsRead(t *testing.T) {
 	s := testStore(t)
-	s.Upsert(ev("a", "t1", true))
-	s.Upsert(ev("b", "t2", true))
+	s.Upsert(bg, ev("a", "t1", true))
+	s.Upsert(bg, ev("b", "t2", true))
 
 	// Only t1 is still unread on GitHub; t2 was read there.
-	if err := s.ReconcileNotifications(map[string]bool{"t1": true}); err != nil {
+	if err := s.ReconcileNotifications(bg, map[string]bool{"t1": true}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.List()
+	got, _ := s.List(bg)
 	byRepo := map[string]bool{}
 	for _, e := range got {
 		byRepo[e.ID] = e.Unread
@@ -87,14 +92,14 @@ func TestReconcileMarksAbsentThreadsRead(t *testing.T) {
 
 func TestReconcileNotificationsEmptyActiveMarksAllRead(t *testing.T) {
 	s := testStore(t)
-	s.Upsert(ev("a", "t1", true))
-	s.Upsert(ev("b", "t2", true))
+	s.Upsert(bg, ev("a", "t1", true))
+	s.Upsert(bg, ev("b", "t2", true))
 
 	// An empty active set means nothing is unread on GitHub anymore.
-	if err := s.ReconcileNotifications(map[string]bool{}); err != nil {
+	if err := s.ReconcileNotifications(bg, map[string]bool{}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.List()
+	got, _ := s.List(bg)
 	for _, e := range got {
 		if e.Unread {
 			t.Errorf("event %s should be reconciled to read", e.ID)
@@ -107,31 +112,31 @@ func TestOpenPRRosterUpsertsAndReconciles(t *testing.T) {
 	pr := func(key, title string) OpenPR {
 		return OpenPR{Key: key, Repo: "acme/api", Title: title, UpdatedAt: time.Now()}
 	}
-	if err := s.SetOpenPR(pr("acme/api#1", "one")); err != nil {
+	if err := s.SetOpenPR(bg, pr("acme/api#1", "one")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetOpenPR(pr("acme/api#2", "two")); err != nil {
+	if err := s.SetOpenPR(bg, pr("acme/api#2", "two")); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.OpenPRs()
+	got, _ := s.OpenPRs(bg)
 	if len(got) != 2 {
 		t.Fatalf("want 2 roster rows, got %d", len(got))
 	}
 
 	// #2 has since closed: only #1 comes back in the next poll.
-	if err := s.ReconcileOpenPRs(map[string]bool{"acme/api#1": true}); err != nil {
+	if err := s.ReconcileOpenPRs(bg, map[string]bool{"acme/api#1": true}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = s.OpenPRs()
+	got, _ = s.OpenPRs(bg)
 	if len(got) != 1 || got[0].Key != "acme/api#1" {
 		t.Fatalf("reconcile kept the wrong rows: %+v", got)
 	}
 
 	// No open PRs in the poll at all: the whole roster clears.
-	if err := s.ReconcileOpenPRs(map[string]bool{}); err != nil {
+	if err := s.ReconcileOpenPRs(bg, map[string]bool{}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ = s.OpenPRs(); len(got) != 0 {
+	if got, _ = s.OpenPRs(bg); len(got) != 0 {
 		t.Fatalf("empty poll should clear the roster, got %+v", got)
 	}
 }
@@ -142,14 +147,14 @@ func TestBackfillDetailsRewritesOnlyMatchingTokens(t *testing.T) {
 	raw.Detail = "author"
 	kept := ev("kept", "t2", true)
 	kept.Detail = "new comment"
-	if err := s.UpsertAll([]timeline.Event{raw, kept}); err != nil {
+	if err := s.UpsertAll(bg, []timeline.Event{raw, kept}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := s.BackfillDetails(map[string]string{"author": "activity on your PR"}); err != nil {
+	if err := s.BackfillDetails(bg, map[string]string{"author": "activity on your PR"}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.List()
+	got, _ := s.List(bg)
 	by := map[string]string{}
 	for _, e := range got {
 		by[e.ID] = e.Detail
@@ -165,22 +170,22 @@ func TestBackfillDetailsRewritesOnlyMatchingTokens(t *testing.T) {
 func TestReconcileReviewRequestsResolvesAndResurfaces(t *testing.T) {
 	s := testStore(t)
 	// ev() builds a KindReviewRequested row on acme/api#1.
-	s.Upsert(ev("a", "t1", true))
+	s.Upsert(bg, ev("a", "t1", true))
 
 	// Reviewed at head -> auto-resolve (drops from the Inbox).
-	if err := s.ReconcileReviewRequests([]ReviewState{{Repo: "acme/api", Number: 1, AtHead: true}}); err != nil {
+	if err := s.ReconcileReviewRequests(bg, []ReviewState{{Repo: "acme/api", Number: 1, AtHead: true}}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.List()
+	got, _ := s.List(bg)
 	if got[0].Unread {
 		t.Fatal("reviewed-at-head request should be marked read")
 	}
 
 	// New commits since the review -> re-surface as unread.
-	if err := s.ReconcileReviewRequests([]ReviewState{{Repo: "acme/api", Number: 1, AtHead: false}}); err != nil {
+	if err := s.ReconcileReviewRequests(bg, []ReviewState{{Repo: "acme/api", Number: 1, AtHead: false}}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = s.List()
+	got, _ = s.List(bg)
 	if !got[0].Unread {
 		t.Fatal("stale review should re-surface the request as unread")
 	}
@@ -191,12 +196,12 @@ func TestReconcileReviewRequestsLeavesOtherKindsAlone(t *testing.T) {
 	// A comment (not a review request) on the same PR must be untouched.
 	e := ev("c", "t1", true)
 	e.Kind = timeline.KindCommented
-	s.Upsert(e)
+	s.Upsert(bg, e)
 
-	if err := s.ReconcileReviewRequests([]ReviewState{{Repo: "acme/api", Number: 1, AtHead: true}}); err != nil {
+	if err := s.ReconcileReviewRequests(bg, []ReviewState{{Repo: "acme/api", Number: 1, AtHead: true}}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.List()
+	got, _ := s.List(bg)
 	if !got[0].Unread {
 		t.Fatal("a non-review-request event should not be auto-resolved")
 	}
@@ -204,18 +209,18 @@ func TestReconcileReviewRequestsLeavesOtherKindsAlone(t *testing.T) {
 
 func TestPruneKeepsUnreadRemovesOldRead(t *testing.T) {
 	s := testStore(t)
-	s.Upsert(ev("keep", "t1", true))  // unread -> must survive
-	s.Upsert(ev("drop", "t2", false)) // github-read -> prunable
+	s.Upsert(bg, ev("keep", "t1", true))  // unread -> must survive
+	s.Upsert(bg, ev("drop", "t2", false)) // github-read -> prunable
 
 	// Force drop's last_seen into the past.
 	old := time.Now().Add(-30 * 24 * time.Hour).Unix()
 	if _, err := s.db.Exec(`UPDATE events SET last_seen=? WHERE id='drop'`, old); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Prune(7 * 24 * time.Hour); err != nil {
+	if err := s.Prune(bg, 7*24*time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.List()
+	got, _ := s.List(bg)
 	if len(got) != 1 || got[0].ID != "keep" {
 		t.Fatalf("prune removed the wrong rows: %+v", got)
 	}

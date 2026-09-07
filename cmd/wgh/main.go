@@ -122,11 +122,11 @@ func runList(ctx context.Context) error {
 	if err := syncReviews(ctx, c, st); err != nil {
 		fmt.Fprintln(os.Stderr, dim("⚠ review-state poll failed: "+err.Error()))
 	}
-	if err := st.Prune(cfg.Retention); err != nil {
+	if err := st.Prune(ctx, cfg.Retention); err != nil {
 		return fmt.Errorf("pruning: %w", err)
 	}
 
-	stored, err := st.List()
+	stored, err := st.List(ctx)
 	if err != nil {
 		return fmt.Errorf("loading timeline: %w", err)
 	}
@@ -149,11 +149,11 @@ func syncNotifications(ctx context.Context, c *github.Client, st *store.Store, v
 	notes = keepSignal(notes)
 	events := enrichAll(ctx, c, notes, viewer)
 
-	fresh, err := persist(st, events)
+	fresh, err := persist(ctx, st, events)
 	if err != nil {
 		return nil, err
 	}
-	if err := st.ReconcileNotifications(activeThreadIDs(notes)); err != nil {
+	if err := st.ReconcileNotifications(ctx, activeThreadIDs(notes)); err != nil {
 		return nil, fmt.Errorf("reconciling read state: %w", err)
 	}
 	return fresh, nil
@@ -180,25 +180,25 @@ func syncTracked(ctx context.Context, c *github.Client, st *store.Store, viewer 
 		key := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
 		if pr.Author == viewer { // keep the roster of my open PRs (incl. drafts)
 			mineKeys[key] = true
-			note(st.SetOpenPR(toOpenPR(pr, key)))
+			note(st.SetOpenPR(ctx, toOpenPR(pr, key)))
 		}
 		if pr.IsDraft { // don't nag about a work-in-progress
 			continue
 		}
-		prev, existed, err := st.GetPRState(key)
+		prev, existed, err := st.GetPRState(ctx, key)
 		if err != nil {
 			note(err)
 			continue
 		}
 		evs, next := tracker.Diff(prev, existed, pr, viewer, time.Now())
-		if err := st.SetPRState(next); err != nil {
+		if err := st.SetPRState(ctx, next); err != nil {
 			note(err)
 			continue
 		}
 		events = append(events, evs...)
 	}
-	note(st.ReconcileOpenPRs(mineKeys)) // drop PRs that have since merged/closed
-	fresh, err := persist(st, events)
+	note(st.ReconcileOpenPRs(ctx, mineKeys)) // drop PRs that have since merged/closed
+	fresh, err := persist(ctx, st, events)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func syncReviews(ctx context.Context, c *github.Client, st *store.Store) error {
 	for i, rs := range states {
 		verdicts[i] = store.ReviewState{Repo: rs.Repo, Number: rs.Number, AtHead: rs.AtHead}
 	}
-	return st.ReconcileReviewRequests(verdicts)
+	return st.ReconcileReviewRequests(ctx, verdicts)
 }
 
 // toOpenPR maps a fetched PR to its roster row.
@@ -233,12 +233,12 @@ func toOpenPR(pr github.TrackedPR, key string) store.OpenPR {
 
 // persist upserts events and returns the subset that were newly inserted, each
 // reloaded so it carries its assigned seq for display.
-func persist(st *store.Store, events []timeline.Event) ([]timeline.Event, error) {
-	existing, err := st.ExistingIDs(ids(events))
+func persist(ctx context.Context, st *store.Store, events []timeline.Event) ([]timeline.Event, error) {
+	existing, err := st.ExistingIDs(ctx, ids(events))
 	if err != nil {
 		return nil, fmt.Errorf("checking store: %w", err)
 	}
-	if err := st.UpsertAll(events); err != nil {
+	if err := st.UpsertAll(ctx, events); err != nil {
 		return nil, fmt.Errorf("saving events: %w", err)
 	}
 	var fresh []timeline.Event
@@ -246,7 +246,7 @@ func persist(st *store.Store, events []timeline.Event) ([]timeline.Event, error)
 		if existing[e.ID] {
 			continue
 		}
-		if stored, err := st.GetByID(e.ID); err == nil {
+		if stored, err := st.GetByID(ctx, e.ID); err == nil {
 			fresh = append(fresh, stored)
 		}
 	}
@@ -281,7 +281,7 @@ func runMark(ctx context.Context, args []string, open bool) error {
 	}
 	defer st.Close()
 
-	e, err := st.Get(seq)
+	e, err := st.Get(ctx, seq)
 	if err != nil {
 		return fmt.Errorf("no item #%d in the timeline", seq)
 	}
@@ -304,7 +304,7 @@ func applyMark(ctx context.Context, st *store.Store, e timeline.Event, open bool
 			return fmt.Errorf("could not open browser: %w", err)
 		}
 	}
-	if err := st.MarkRead(e.Seq); err != nil {
+	if err := st.MarkRead(ctx, e.Seq); err != nil {
 		return fmt.Errorf("marking read: %w", err)
 	}
 	if e.Source == "notification" && e.ThreadID != "" {
@@ -322,7 +322,7 @@ func applyMark(ctx context.Context, st *store.Store, e timeline.Event, open bool
 // setup opens the API client and store and resolves the viewer login — the
 // preamble for the one-shot piped list, which needs the viewer up front.
 func setup(ctx context.Context) (*github.Client, *store.Store, string, error) {
-	c, st, err := setupLocal()
+	c, st, err := setupLocal(ctx)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -337,7 +337,7 @@ func setup(ctx context.Context) (*github.Client, *store.Store, string, error) {
 // setupLocal opens the API client and store with no network round-trip — the
 // fast path for the TUI, which draws from the store first and resolves the
 // viewer in a background sync.
-func setupLocal() (*github.Client, *store.Store, error) {
+func setupLocal(ctx context.Context) (*github.Client, *store.Store, error) {
 	c, err := github.New()
 	if err != nil {
 		return nil, nil, err
@@ -346,7 +346,7 @@ func setupLocal() (*github.Client, *store.Store, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	_ = ingest.Backfill(st) // one-off cleanup of pre-fix rows
+	_ = ingest.Backfill(ctx, st) // one-off cleanup of pre-fix rows
 	return c, st, nil
 }
 

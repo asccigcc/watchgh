@@ -52,7 +52,7 @@ func pollOnce(ctx context.Context, c *github.Client, st *store.Store, viewer str
 	if err := syncReviews(ctx, c, st); err != nil {
 		fmt.Fprintln(os.Stderr, "poll: reviews:", err)
 	}
-	_ = st.Prune(cfg.Retention)
+	_ = st.Prune(ctx, cfg.Retention)
 	if notify {
 		notifyActionable(append(nf, tf...))
 	}

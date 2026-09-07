@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"time"
 )
@@ -15,9 +16,9 @@ type PRState struct {
 }
 
 // GetPRState returns the stored state for a PR and whether a row existed.
-func (s *Store) GetPRState(key string) (PRState, bool, error) {
+func (s *Store) GetPRState(ctx context.Context, key string) (PRState, bool, error) {
 	st := PRState{Key: key}
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT head_sha, ci_state, merge_state FROM pr_state WHERE pr_key=?`, key).
 		Scan(&st.HeadSHA, &st.CIState, &st.MergeState)
 	if err == sql.ErrNoRows {
@@ -30,8 +31,8 @@ func (s *Store) GetPRState(key string) (PRState, bool, error) {
 }
 
 // SetPRState upserts the last-seen state for a PR.
-func (s *Store) SetPRState(st PRState) error {
-	_, err := s.db.Exec(`
+func (s *Store) SetPRState(ctx context.Context, st PRState) error {
+	_, err := s.db.ExecContext(ctx, `
 INSERT INTO pr_state (pr_key, head_sha, ci_state, merge_state, updated_at)
 VALUES (?,?,?,?,?)
 ON CONFLICT(pr_key) DO UPDATE SET
