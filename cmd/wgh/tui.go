@@ -159,14 +159,12 @@ func (t *tui) run() error {
 	// When the launchd poller is up it owns polling and notifications, so the
 	// view just re-reads the store it writes (via tick) and refreshes on launch
 	// and R. Only when the poller is down does the view self-poll GitHub — and
-	// then it notifies, so a single actor is ever the notifier. A nil channel
-	// blocks forever, keeping that self-poll path off when the daemon is up.
-	var pollC <-chan time.Time
-	if !t.daemonUp {
-		poll := time.NewTicker(cfg.PollFloor)
-		defer poll.Stop()
-		pollC = poll.C
-	}
+	// then it notifies, so a single actor is ever the notifier. The ticker always
+	// runs; each tick re-samples whether the poller is live and self-polls only
+	// while it's down, so a poller that starts or dies mid-session can never make
+	// the view double-notify or fall silent.
+	poll := time.NewTicker(cfg.PollFloor)
+	defer poll.Stop()
 
 	for {
 		select {
@@ -179,8 +177,12 @@ func (t *tui) run() error {
 			if t.reload() {
 				t.draw()
 			}
-		case <-pollC:
-			if !t.syncing { // skip if the previous poll is still running
+		case <-poll.C:
+			if up := agent.Running(); up != t.daemonUp {
+				t.daemonUp = up
+				t.draw() // reflect the footer dot when the poller starts/stops
+			}
+			if !t.daemonUp && !t.syncing { // self-poll only while the poller is down
 				t.syncing = true
 				go t.sync(t.c, t.viewer, true, syncDone)
 				t.draw()
@@ -222,8 +224,10 @@ func (t *tui) handle(k keyEvent, syncDone chan<- syncResult) bool {
 	case keyRead:
 		t.act(false)
 	case keySync:
-		t.syncing = true
-		go t.sync(t.c, t.viewer, false, syncDone)
+		if !t.syncing { // ignore R while a sync is already in flight
+			t.syncing = true
+			go t.sync(t.c, t.viewer, false, syncDone)
+		}
 	case keyTab1:
 		t.switchTab(0)
 	case keyTab2:
@@ -657,45 +661,87 @@ const (
 
 type keyEvent struct{ kind keyKind }
 
-// readKeys parses stdin into key events until the stream closes.
+// readKeys parses stdin into key events until the stream closes. A trailing
+// incomplete escape sequence (a CSI split across two reads under load) is held
+// in carry and prepended to the next read, so an arrow key straddling a buffer
+// boundary isn't misdecoded as a lone Escape (quit).
 func readKeys(f *os.File, out chan<- keyEvent) {
 	defer close(out)
 	buf := make([]byte, 16)
+	var carry []byte
 	for {
 		n, err := f.Read(buf)
 		if err != nil {
 			return
 		}
-		for _, k := range parseKeys(buf[:n]) {
+		data := buf[:n]
+		if len(carry) > 0 {
+			data = append(carry, data...)
+		}
+		events, leftover := parseKeys(data)
+		for _, k := range events {
 			out <- k
 		}
+		// Copy leftover: data may alias buf, which the next Read overwrites.
+		carry = append([]byte(nil), leftover...)
 	}
 }
 
-func parseKeys(b []byte) []keyEvent {
-	var out []keyEvent
-	for i := 0; i < len(b); i++ {
+// parseKeys decodes a byte buffer into key events. It returns any trailing bytes
+// that form an incomplete escape sequence (ESC [ … with no final byte yet) so
+// the caller can hold them for the next read rather than misfire a quit.
+func parseKeys(b []byte) (events []keyEvent, carry []byte) {
+	for i := 0; i < len(b); {
 		c := b[i]
 		switch {
-		case c == 0x1b && i+2 < len(b) && b[i+1] == '[':
-			out = append(out, csiKey(b[i+2]))
-			i += 2
-		case c == 0x1b: // lone Escape
-			out = append(out, keyEvent{keyQuit})
+		case c == 0x1b:
+			ev, n, complete := parseEsc(b[i:])
+			if !complete {
+				return events, b[i:] // hold the incomplete tail for the next read
+			}
+			if ev.kind != keyNone {
+				events = append(events, ev)
+			}
+			i += n
 		case c == '\r' || c == '\n':
-			out = append(out, keyEvent{keyOpen})
+			events = append(events, keyEvent{keyOpen})
+			i++
 		case c == 0x03: // Ctrl-C
-			out = append(out, keyEvent{keyQuit})
+			events = append(events, keyEvent{keyQuit})
+			i++
 		case c == '\t': // cycle to the next tab
-			out = append(out, keyEvent{keyTabNext})
+			events = append(events, keyEvent{keyTabNext})
+			i++
 		default:
-			out = append(out, runeKey(rune(c)))
+			events = append(events, runeKey(rune(c)))
+			i++
 		}
 	}
-	return out
+	return events, nil
 }
 
-func csiKey(final byte) keyEvent {
+// parseEsc decodes the escape sequence at the start of b (b[0] is ESC). It
+// reports the event, bytes consumed, and whether the sequence was complete. A
+// bare ESC — or ESC followed by a non-CSI byte — is a real Escape keypress
+// (quit), keeping the key responsive; only a started-but-unfinished CSI reports
+// complete=false so readKeys can wait for the rest.
+func parseEsc(b []byte) (ev keyEvent, n int, complete bool) {
+	if len(b) == 1 || b[1] != '[' {
+		return keyEvent{keyQuit}, 1, true // lone Escape (consume just the ESC)
+	}
+	// CSI: ESC [ params… final, where final is any byte in 0x40–0x7e.
+	for i := 2; i < len(b); i++ {
+		if b[i] >= 0x40 && b[i] <= 0x7e {
+			return csiKey(b[2:i], b[i]), i + 1, true
+		}
+	}
+	return keyEvent{keyNone}, 0, false // unfinished CSI; hold for the next read
+}
+
+// csiKey maps a CSI sequence's parameter bytes and final byte to a key. It
+// handles both the letter-final arrows/Home/End and the tilde-final navigation
+// keys (PageUp/Down, Home/End), ignoring any modifier parameters (e.g. "1;5").
+func csiKey(params []byte, final byte) keyEvent {
 	switch final {
 	case 'A':
 		return keyEvent{keyUp}
@@ -705,13 +751,35 @@ func csiKey(final byte) keyEvent {
 		return keyEvent{keyTop}
 	case 'F':
 		return keyEvent{keyBottom}
-	case '5': // PageUp arrives as ESC [ 5 ~ ; the ~ is harmlessly dropped
-		return keyEvent{keyPageUp}
-	case '6':
-		return keyEvent{keyPageDown}
-	default:
-		return keyEvent{keyNone}
+	case '~':
+		switch csiParam(params) {
+		case 1, 7: // Home
+			return keyEvent{keyTop}
+		case 4, 8: // End
+			return keyEvent{keyBottom}
+		case 5:
+			return keyEvent{keyPageUp}
+		case 6:
+			return keyEvent{keyPageDown}
+		}
 	}
+	return keyEvent{keyNone}
+}
+
+// csiParam reads the leading numeric parameter of a CSI sequence (the part
+// before any ';' modifier), returning -1 when there isn't one.
+func csiParam(params []byte) int {
+	n := -1
+	for _, c := range params {
+		if c < '0' || c > '9' {
+			break
+		}
+		if n < 0 {
+			n = 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 func runeKey(r rune) keyEvent {

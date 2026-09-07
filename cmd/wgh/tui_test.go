@@ -30,7 +30,10 @@ func TestParseKeys(t *testing.T) {
 		"\t":     {keyTabNext},
 	}
 	for in, want := range cases {
-		got := parseKeys([]byte(in))
+		got, carry := parseKeys([]byte(in))
+		if len(carry) != 0 {
+			t.Errorf("parseKeys(%q) unexpected carry %q", in, carry)
+		}
 		if len(got) != len(want) {
 			t.Errorf("parseKeys(%q) len = %d, want %d", in, len(got), len(want))
 			continue
@@ -45,9 +48,69 @@ func TestParseKeys(t *testing.T) {
 
 func TestParseKeysArrowThenChar(t *testing.T) {
 	// An arrow immediately followed by 'q' in one read should yield both.
-	got := parseKeys([]byte("\x1b[Bq"))
+	got, _ := parseKeys([]byte("\x1b[Bq"))
 	if len(got) != 2 || got[0].kind != keyDown || got[1].kind != keyQuit {
 		t.Errorf("got %+v, want [down quit]", got)
+	}
+}
+
+func TestParseKeysTildeNavigation(t *testing.T) {
+	// The tilde-final CSI keys must decode to the right navigation actions, with
+	// the trailing ~ fully consumed (not left to fall through as keyNone).
+	cases := map[string]keyKind{
+		"\x1b[5~": keyPageUp,
+		"\x1b[6~": keyPageDown,
+		"\x1b[1~": keyTop,    // Home
+		"\x1b[4~": keyBottom, // End
+	}
+	for in, want := range cases {
+		got, carry := parseKeys([]byte(in))
+		if len(carry) != 0 {
+			t.Errorf("parseKeys(%q) unexpected carry %q", in, carry)
+		}
+		if len(got) != 1 || got[0].kind != want {
+			t.Errorf("parseKeys(%q) = %+v, want single %v", in, got, want)
+		}
+	}
+}
+
+func TestParseKeysIgnoresModifierParams(t *testing.T) {
+	// A modified arrow (ESC [ 1 ; 5 A) still resolves to the base arrow.
+	got, _ := parseKeys([]byte("\x1b[1;5A"))
+	if len(got) != 1 || got[0].kind != keyUp {
+		t.Errorf("modified arrow: got %+v, want [up]", got)
+	}
+}
+
+func TestParseKeysHoldsSplitCSI(t *testing.T) {
+	// A CSI split across two reads must not be misread as a lone Escape (quit):
+	// the incomplete tail is returned as carry and completed on the next read.
+	got, carry := parseKeys([]byte("j\x1b["))
+	if len(got) != 1 || got[0].kind != keyDown {
+		t.Errorf("first half: got %+v, want [down]", got)
+	}
+	if string(carry) != "\x1b[" {
+		t.Errorf("first half carry = %q, want ESC[", carry)
+	}
+	// Prepending the carry to the next read completes the arrow.
+	got, carry = parseKeys(append(carry, 'A'))
+	if len(carry) != 0 {
+		t.Errorf("second half carry = %q, want none", carry)
+	}
+	if len(got) != 1 || got[0].kind != keyUp {
+		t.Errorf("completed sequence: got %+v, want [up]", got)
+	}
+}
+
+func TestParseKeysBareEscapeStillQuits(t *testing.T) {
+	// A bare trailing ESC is a real Escape keypress and must quit, not hang
+	// waiting for more bytes.
+	got, carry := parseKeys([]byte("\x1b"))
+	if len(carry) != 0 {
+		t.Errorf("bare ESC carry = %q, want none", carry)
+	}
+	if len(got) != 1 || got[0].kind != keyQuit {
+		t.Errorf("bare ESC: got %+v, want [quit]", got)
 	}
 }
 
