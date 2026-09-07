@@ -69,16 +69,17 @@ type tui struct {
 	c      *github.Client
 	viewer string
 
-	all    []timeline.Event // every stored event, newest first (unfiltered)
-	prs    []timeline.Event // Mine tab: one synthesized row per open PR
-	events []timeline.Event // the active tab's visible rows
-	active int              // current tab index
-	pos    []int            // remembered selection index, per tab
-	sel    int              // index of the selected row (0 = top = newest)
-	top    int              // index of the first visible row (scroll offset)
-	rows   int              // terminal height
-	cols   int              // terminal width
-	status string           // footer message (last action, sync state, warnings)
+	all     []timeline.Event // every stored event, newest first (unfiltered)
+	prs     []timeline.Event // Mine tab: one synthesized row per open PR
+	events  []timeline.Event // the active tab's visible rows
+	active  int              // current tab index
+	pos     []int            // remembered selection index, per tab
+	sel     int              // index of the selected row (0 = top = newest)
+	top     int              // index of the first visible row (scroll offset)
+	rows    int              // terminal height
+	cols    int              // terminal width
+	status  string           // footer message (last action + warnings)
+	syncing bool             // a background sync is in flight (shown in the title bar)
 }
 
 // mineTab is the index of "My PRs" in tabDefs; it is sourced from the open-PR
@@ -121,6 +122,7 @@ func (t *tui) run() error {
 	t.resize()
 	t.reload()
 	t.status = "1-4/⇥ tabs · ↑↓ move · ⏎ open · r read · R sync · q quit"
+	t.syncing = true // the launch sync (kicked off below) is already in flight
 	t.draw()
 
 	keys := make(chan keyEvent, 16)
@@ -187,7 +189,7 @@ func (t *tui) handle(k keyEvent, syncDone chan<- syncResult) bool {
 	case keyRead:
 		t.act(false)
 	case keySync:
-		t.status = "syncing…"
+		t.syncing = true
 		go t.sync(t.c, t.viewer, syncDone)
 	case keyTab1:
 		t.switchTab(0)
@@ -250,7 +252,7 @@ func (t *tui) act(open bool) {
 type syncResult struct {
 	client *github.Client // the built client (nil unless this run created it)
 	viewer string         // the resolved login (empty when already known or on failure)
-	status string         // footer message to show
+	warn   string         // footer warning; empty on success (a clean sync stays silent)
 }
 
 // sync polls GitHub once off the input path — building the client (which
@@ -261,7 +263,7 @@ func (t *tui) sync(c *github.Client, viewer string, done chan<- syncResult) {
 	if c == nil {
 		nc, err := github.New()
 		if err != nil {
-			done <- syncResult{status: "⚠ " + err.Error()}
+			done <- syncResult{warn: "⚠ " + err.Error()}
 			return
 		}
 		c = nc
@@ -269,7 +271,7 @@ func (t *tui) sync(c *github.Client, viewer string, done chan<- syncResult) {
 	if viewer == "" {
 		v, err := c.Viewer(t.ctx)
 		if err != nil {
-			done <- syncResult{client: c, status: "⚠ sync: " + err.Error()}
+			done <- syncResult{client: c, warn: "⚠ sync: " + err.Error()}
 			return
 		}
 		viewer = v.Login
@@ -278,12 +280,12 @@ func (t *tui) sync(c *github.Client, viewer string, done chan<- syncResult) {
 	_, terr := syncTracked(t.ctx, c, t.st, viewer)
 	rerr := syncReviews(t.ctx, c, t.st)
 	t.st.Prune(cfg.Retention)
-	done <- syncResult{client: c, viewer: viewer, status: syncStatus(nerr, terr, rerr)}
+	done <- syncResult{client: c, viewer: viewer, warn: syncWarning(nerr, terr, rerr)}
 }
 
-// syncStatus turns the three sync errors into the footer message, reporting the
-// first failure or the success time.
-func syncStatus(nerr, terr, rerr error) string {
+// syncWarning returns the first sync failure as a footer message, or "" when
+// every poll succeeded — a clean sync leaves the footer menu untouched.
+func syncWarning(nerr, terr, rerr error) string {
 	switch {
 	case nerr != nil:
 		return "⚠ sync: " + nerr.Error()
@@ -292,21 +294,24 @@ func syncStatus(nerr, terr, rerr error) string {
 	case rerr != nil:
 		return "⚠ review-state sync: " + rerr.Error()
 	default:
-		return "synced " + time.Now().Format("15:04:05")
+		return ""
 	}
 }
 
-// applySync folds a finished background sync into the view: cache the built
-// client and resolved viewer login so later syncs reuse them, show its status,
-// and re-read the freshly-written store.
+// applySync folds a finished background sync into the view: clear the syncing
+// marker, cache the built client and resolved viewer login so later syncs reuse
+// them, surface any warning (a clean sync stays silent), and re-read the store.
 func (t *tui) applySync(res syncResult) {
+	t.syncing = false
 	if res.client != nil {
 		t.c = res.client
 	}
 	if res.viewer != "" {
 		t.viewer = res.viewer
 	}
-	t.status = res.status
+	if res.warn != "" {
+		t.status = res.warn
+	}
 	t.reload()
 }
 
@@ -478,9 +483,14 @@ func (t *tui) draw() {
 	fmt.Fprint(os.Stdout, b.String())
 }
 
-// titleBar is the app name, a full-width blue bar across the top.
+// titleBar is the app name, a full-width blue bar across the top. A background
+// sync shows a "⟳ syncing" marker here so the footer's keybinding menu stays put.
 func (t *tui) titleBar() string {
-	return styChrome + padANSI(" ◆ watchgh — GitHub activity timeline", t.cols) + reset
+	title := " ◆ watchgh — GitHub activity timeline"
+	if t.syncing {
+		title += "  ⟳ syncing"
+	}
+	return styChrome + padANSI(title, t.cols) + reset
 }
 
 // header draws the tab bar: the active tab reversed, each with its live count.
