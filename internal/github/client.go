@@ -49,12 +49,15 @@ func New() (*Client, error) {
 	}, nil
 }
 
-// resolveToken prefers GITHUB_TOKEN, then falls back to `gh auth token`.
+// resolveToken prefers GITHUB_TOKEN, then falls back to `gh auth token`. The
+// fallback is bounded so a wedged `gh` can't hang startup indefinitely.
 func resolveToken() (string, error) {
 	if t := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); t != "" {
 		return t, nil
 	}
-	out, err := exec.Command("gh", "auth", "token").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
 	if err != nil {
 		return "", fmt.Errorf("no token found: set GITHUB_TOKEN or run `gh auth login`")
 	}

@@ -283,7 +283,9 @@ func runMark(ctx context.Context, args []string, open bool) error {
 // failed — the local read still succeeded — so callers surface it as a warning.
 func applyMark(ctx context.Context, st *store.Store, e timeline.Event, open bool) error {
 	if open && e.URL != "" {
-		if err := exec.Command("open", e.URL).Run(); err != nil {
+		octx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := exec.CommandContext(octx, "open", e.URL).Run(); err != nil {
 			return fmt.Errorf("could not open browser: %w", err)
 		}
 	}

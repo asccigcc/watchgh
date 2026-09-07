@@ -5,21 +5,29 @@
 package notify
 
 import (
+	"context"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// sendTimeout bounds the notifier subprocess so a wedged helper can't block the
+// poll loop that fires notifications.
+const sendTimeout = 10 * time.Second
 
 // Send posts a desktop notification. url is opened on click when supported.
 // Failures are best-effort and returned for optional logging.
 func Send(title, message, url string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+	defer cancel()
 	if path, err := exec.LookPath("terminal-notifier"); err == nil {
 		args := []string{"-title", title, "-message", message}
 		if url != "" {
 			args = append(args, "-open", url)
 		}
-		return exec.Command(path, args...).Run()
+		return exec.CommandContext(ctx, path, args...).Run()
 	}
-	return exec.Command("osascript", "-e", osaScript(title, message)).Run()
+	return exec.CommandContext(ctx, "osascript", "-e", osaScript(title, message)).Run()
 }
 
 // osaScript builds the AppleScript for a notification, escaping title and

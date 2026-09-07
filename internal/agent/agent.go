@@ -6,19 +6,27 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 // Label is the launchd job label; it also names the plist file.
 const Label = "com.watchgh.poller"
 
+// cmdTimeout bounds every launchctl call so a wedged launchd can't block the
+// poll loop or the TUI footer, both of which sample Running() on a ticker.
+const cmdTimeout = 10 * time.Second
+
 // Running reports whether the LaunchAgent is currently loaded.
 func Running() bool {
-	return exec.Command("launchctl", "list", Label).Run() == nil
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, "launchctl", "list", Label).Run() == nil
 }
 
 // Ensure installs and loads the agent if it isn't already running. It is
@@ -135,6 +143,8 @@ func bootout() error {
 }
 
 func run(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
 }
