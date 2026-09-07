@@ -84,6 +84,7 @@ type tui struct {
 	all      []timeline.Event // every stored event, newest first (unfiltered)
 	prs      []timeline.Event // Mine tab: one synthesized row per open PR
 	events   []timeline.Event // the active tab's visible rows
+	counts   []int            // per-tab row count for the tab-bar badges (recomputed on reload)
 	active   int              // current tab index
 	pos      []int            // remembered selection index, per tab
 	sel      int              // index of the selected row (0 = top = newest)
@@ -132,6 +133,7 @@ func (t *tui) run() error {
 	defer fmt.Fprint(os.Stdout, curShow+altExit)
 
 	t.pos = make([]int, len(tabDefs))
+	t.counts = make([]int, len(tabDefs))
 	t.resize()
 	t.reload()
 	if t.status == "" { // keep any launch warning (e.g. poller install failed)
@@ -255,8 +257,27 @@ func (t *tui) switchTab(i int) {
 
 func (t *tui) cycleTab() { t.switchTab((t.active + 1) % len(tabDefs)) }
 
-// count is how many rows tab i holds (for the tab-bar badges).
-func (t *tui) count(i int) int { return len(t.tabRows(i)) }
+// count is how many rows tab i holds (for the tab-bar badges), served from the
+// cache recount fills on reload rather than rebuilding a filtered slice per frame.
+func (t *tui) count(i int) int { return t.counts[i] }
+
+// recount refreshes the per-tab badge counts without allocating a filtered slice
+// per tab: Mine is the roster length, the rest count matches over stored events.
+func (t *tui) recount() {
+	for i, d := range tabDefs {
+		if i == mineTab {
+			t.counts[i] = len(t.prs)
+			continue
+		}
+		n := 0
+		for _, e := range t.all {
+			if d.show(e) {
+				n++
+			}
+		}
+		t.counts[i] = n
+	}
+}
 
 func (t *tui) move(delta int) {
 	t.sel += delta
@@ -373,6 +394,7 @@ func (t *tui) reload() bool {
 	before := signature(t.all)
 	t.all = stored
 	t.prs = t.mineRoster()
+	t.recount()
 	t.applyFilter()
 	return before != signature(t.all)
 }
@@ -820,26 +842,27 @@ func truncateANSI(s string, w int) string {
 		return ""
 	}
 	var b strings.Builder
+	b.Grow(len(s))
 	vis := 0
-	rs := []rune(s)
-	for i := 0; i < len(rs); i++ {
-		if rs[i] == 0x1b {
-			j := i
-			for j < len(rs) && rs[j] != 'm' {
-				j++
+	inEsc := false // inside an ESC…m sequence, which copies verbatim at zero width
+	for _, r := range s {
+		if inEsc {
+			b.WriteRune(r)
+			if r == 'm' {
+				inEsc = false
 			}
-			if j < len(rs) {
-				j++
-			}
-			b.WriteString(string(rs[i:j]))
-			i = j - 1
+			continue
+		}
+		if r == 0x1b {
+			inEsc = true
+			b.WriteRune(r)
 			continue
 		}
 		if vis >= w {
 			b.WriteString(reset)
 			return b.String()
 		}
-		b.WriteRune(rs[i])
+		b.WriteRune(r)
 		vis++
 	}
 	return b.String()
@@ -850,7 +873,14 @@ func truncateANSI(s string, w int) string {
 func padANSI(s string, w int) string {
 	n := utf8.RuneCountInString(s)
 	if n > w {
-		return string([]rune(s)[:w])
+		count := 0
+		for i := range s { // range yields the byte offset of each rune start
+			if count == w {
+				return s[:i]
+			}
+			count++
+		}
+		return s
 	}
 	return s + strings.Repeat(" ", w-n)
 }

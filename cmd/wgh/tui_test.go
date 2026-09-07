@@ -185,6 +185,28 @@ func TestTabFilters(t *testing.T) {
 	}
 }
 
+func TestRecountMatchesFiltersAndRoster(t *testing.T) {
+	tui := &tui{
+		counts: make([]int, len(tabDefs)),
+		all: []timeline.Event{
+			{Unread: true, IsMine: false, Source: "notification"},  // Inbox
+			{Unread: true, IsMine: false, Source: "notification"},  // Inbox
+			{Unread: false, IsMine: false, Source: "notification"}, // Read
+			{Unread: true, IsMine: true, Source: "graphql"},        // CI
+		},
+		prs: []timeline.Event{{}, {}, {}}, // three roster rows
+	}
+	tui.recount()
+
+	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3).
+	want := []int{2, 3, 1, 1}
+	for i, w := range want {
+		if tui.counts[i] != w {
+			t.Errorf("counts[%d] = %d, want %d", i, tui.counts[i], w)
+		}
+	}
+}
+
 func TestSynthPR(t *testing.T) {
 	if e := synthPR(store.OpenPR{MergeState: "BLOCKED"}); e.Kind != timeline.KindBlocked || !e.Unread {
 		t.Errorf("blocked PR: got kind %v unread %v, want KindBlocked+unread", e.Kind, e.Unread)
