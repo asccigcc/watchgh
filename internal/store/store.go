@@ -145,23 +145,36 @@ func migrateLegacyDir(newDir string) {
 	}
 }
 
-// Upsert inserts a new event or refreshes the mutable fields of an existing one
-// (matched by ID), preserving seq, first_seen, and any local read_at.
-func (s *Store) Upsert(e timeline.Event) error {
-	now := time.Now().Unix()
-	_, err := s.db.Exec(`
+// upsertEventSQL inserts a new event or refreshes the mutable fields of an
+// existing one (matched by id), preserving seq, first_seen, and any local
+// read_at.
+const upsertEventSQL = `
 INSERT INTO events
   (id, thread_id, source, ts, kind, repo, number, author, detail, url,
    github_unread, actionable, is_mine, first_seen, last_seen)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
   ts=excluded.ts, detail=excluded.detail, github_unread=excluded.github_unread,
-  actionable=excluded.actionable, last_seen=excluded.last_seen`,
+  actionable=excluded.actionable, last_seen=excluded.last_seen`
+
+// execer is the write surface shared by *sql.DB and *sql.Tx, so one upsert body
+// serves both the single and batched paths.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// upsertEvent runs upsertEventSQL against ex (a DB or an open transaction).
+func upsertEvent(ex execer, e timeline.Event) error {
+	now := time.Now().Unix()
+	_, err := ex.Exec(upsertEventSQL,
 		e.ID, e.ThreadID, e.Source, e.TS.Unix(), int(e.Kind), e.Repo, e.Number,
 		e.Author, e.Detail, e.URL, boolToInt(e.Unread), boolToInt(e.Actionable),
 		boolToInt(e.IsMine), now, now)
 	return err
 }
+
+// Upsert inserts or refreshes a single event.
+func (s *Store) Upsert(e timeline.Event) error { return upsertEvent(s.db, e) }
 
 // UpsertAll upserts a batch in one transaction.
 func (s *Store) UpsertAll(events []timeline.Event) error {
@@ -171,86 +184,32 @@ func (s *Store) UpsertAll(events []timeline.Event) error {
 	}
 	defer tx.Rollback()
 	for _, e := range events {
-		if err := s.upsertTx(tx, e); err != nil {
+		if err := upsertEvent(tx, e); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func (s *Store) upsertTx(tx *sql.Tx, e timeline.Event) error {
-	now := time.Now().Unix()
-	_, err := tx.Exec(`
-INSERT INTO events
-  (id, thread_id, source, ts, kind, repo, number, author, detail, url,
-   github_unread, actionable, is_mine, first_seen, last_seen)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET
-  ts=excluded.ts, detail=excluded.detail, github_unread=excluded.github_unread,
-  actionable=excluded.actionable, last_seen=excluded.last_seen`,
-		e.ID, e.ThreadID, e.Source, e.TS.Unix(), int(e.Kind), e.Repo, e.Number,
-		e.Author, e.Detail, e.URL, boolToInt(e.Unread), boolToInt(e.Actionable),
-		boolToInt(e.IsMine), now, now)
-	return err
+// eventColumns is the SELECT list every event read shares. The unread flag is
+// computed: effective unread = not locally read AND still unread on GitHub.
+const eventColumns = `seq, id, thread_id, source, ts, kind, repo, number, author, detail, url,
+       (read_at IS NULL AND github_unread=1), actionable, is_mine`
+
+// rowScanner is the Scan surface shared by *sql.Row and *sql.Rows, so one
+// scanEvent body serves both single-row and iterated reads.
+type rowScanner interface {
+	Scan(dest ...any) error
 }
 
-// List returns all stored events oldest-first. Effective unread = not locally
-// read AND still unread on GitHub's side.
-func (s *Store) List() ([]timeline.Event, error) {
-	rows, err := s.db.Query(`
-SELECT seq, id, thread_id, source, ts, kind, repo, number, author, detail, url,
-       (read_at IS NULL AND github_unread=1), actionable, is_mine
-FROM events ORDER BY ts ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []timeline.Event
-	for rows.Next() {
-		var e timeline.Event
-		var ts int64
-		var kind int
-		var unread, actionable, isMine int
-		if err := rows.Scan(&e.Seq, &e.ID, &e.ThreadID, &e.Source, &ts, &kind,
-			&e.Repo, &e.Number, &e.Author, &e.Detail, &e.URL,
-			&unread, &actionable, &isMine); err != nil {
-			return nil, err
-		}
-		e.TS = time.Unix(ts, 0)
-		e.Kind = timeline.Kind(kind)
-		e.Unread = unread == 1
-		e.Actionable = actionable == 1
-		e.IsMine = isMine == 1
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-// Get returns a single event by its local seq.
-func (s *Store) Get(seq int64) (timeline.Event, error) {
-	return s.scanOne(`
-SELECT seq, id, thread_id, source, ts, kind, repo, number, author, detail, url,
-       (read_at IS NULL AND github_unread=1), actionable, is_mine
-FROM events WHERE seq=?`, seq)
-}
-
-// GetByID returns a single event by its dedupe id (with its assigned seq).
-func (s *Store) GetByID(id string) (timeline.Event, error) {
-	return s.scanOne(`
-SELECT seq, id, thread_id, source, ts, kind, repo, number, author, detail, url,
-       (read_at IS NULL AND github_unread=1), actionable, is_mine
-FROM events WHERE id=?`, id)
-}
-
-func (s *Store) scanOne(query string, arg any) (timeline.Event, error) {
+// scanEvent reads one events row (selected via eventColumns) into an Event.
+func scanEvent(sc rowScanner) (timeline.Event, error) {
 	var e timeline.Event
 	var ts int64
 	var kind, unread, actionable, isMine int
-	err := s.db.QueryRow(query, arg).Scan(&e.Seq, &e.ID, &e.ThreadID, &e.Source, &ts,
-		&kind, &e.Repo, &e.Number, &e.Author, &e.Detail, &e.URL,
-		&unread, &actionable, &isMine)
-	if err != nil {
+	if err := sc.Scan(&e.Seq, &e.ID, &e.ThreadID, &e.Source, &ts, &kind,
+		&e.Repo, &e.Number, &e.Author, &e.Detail, &e.URL,
+		&unread, &actionable, &isMine); err != nil {
 		return e, err
 	}
 	e.TS = time.Unix(ts, 0)
@@ -259,6 +218,35 @@ func (s *Store) scanOne(query string, arg any) (timeline.Event, error) {
 	e.Actionable = actionable == 1
 	e.IsMine = isMine == 1
 	return e, nil
+}
+
+// List returns all stored events oldest-first.
+func (s *Store) List() ([]timeline.Event, error) {
+	rows, err := s.db.Query(`SELECT ` + eventColumns + ` FROM events ORDER BY ts ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []timeline.Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// Get returns a single event by its local seq.
+func (s *Store) Get(seq int64) (timeline.Event, error) {
+	return scanEvent(s.db.QueryRow(`SELECT `+eventColumns+` FROM events WHERE seq=?`, seq))
+}
+
+// GetByID returns a single event by its dedupe id (with its assigned seq).
+func (s *Store) GetByID(id string) (timeline.Event, error) {
+	return scanEvent(s.db.QueryRow(`SELECT `+eventColumns+` FROM events WHERE id=?`, id))
 }
 
 // ExistingIDs returns the subset of ids already present in the store.
@@ -299,35 +287,18 @@ func (s *Store) MarkRead(seq int64) error {
 }
 
 // ReconcileNotifications self-heals GitHub-side reads: any notification-sourced
-// event no longer in the current unread set is marked read on GitHub's side.
+// event whose thread is no longer in the current unread set is marked read on
+// GitHub's side. It runs as a single set-based UPDATE — with no active threads,
+// every such event is stale, so the NOT IN filter drops away entirely.
 func (s *Store) ReconcileNotifications(activeThreadIDs map[string]bool) error {
-	rows, err := s.db.Query(
-		`SELECT seq, thread_id FROM events WHERE source='notification' AND github_unread=1`)
-	if err != nil {
+	const base = `UPDATE events SET github_unread=0 WHERE source='notification' AND github_unread=1`
+	if len(activeThreadIDs) == 0 {
+		_, err := s.db.Exec(base)
 		return err
 	}
-	var stale []int64
-	for rows.Next() {
-		var seq int64
-		var tid string
-		if err := rows.Scan(&seq, &tid); err != nil {
-			rows.Close()
-			return err
-		}
-		if !activeThreadIDs[tid] {
-			stale = append(stale, seq)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, seq := range stale {
-		if _, err := s.db.Exec(`UPDATE events SET github_unread=0 WHERE seq=?`, seq); err != nil {
-			return err
-		}
-	}
-	return nil
+	ph, args := keyArgs(activeThreadIDs)
+	_, err := s.db.Exec(base+` AND thread_id NOT IN (`+ph+`)`, args...)
+	return err
 }
 
 // Prune removes read/resolved events older than maxAge, never touching items
@@ -443,33 +414,16 @@ ON CONFLICT(pr_key) DO UPDATE SET
 }
 
 // ReconcileOpenPRs drops roster rows whose key isn't in the current poll — i.e.
-// PRs that have merged or closed since we last saw them.
+// PRs that have merged or closed since we last saw them. One set-based DELETE;
+// an empty active set means the viewer has no open PRs, so the roster is cleared.
 func (s *Store) ReconcileOpenPRs(activeKeys map[string]bool) error {
-	rows, err := s.db.Query(`SELECT pr_key FROM open_prs`)
-	if err != nil {
+	if len(activeKeys) == 0 {
+		_, err := s.db.Exec(`DELETE FROM open_prs`)
 		return err
 	}
-	var stale []string
-	for rows.Next() {
-		var k string
-		if err := rows.Scan(&k); err != nil {
-			rows.Close()
-			return err
-		}
-		if !activeKeys[k] {
-			stale = append(stale, k)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, k := range stale {
-		if _, err := s.db.Exec(`DELETE FROM open_prs WHERE pr_key=?`, k); err != nil {
-			return err
-		}
-	}
-	return nil
+	ph, args := keyArgs(activeKeys)
+	_, err := s.db.Exec(`DELETE FROM open_prs WHERE pr_key NOT IN (`+ph+`)`, args...)
+	return err
 }
 
 // OpenPRs returns the current roster, most recently updated first.
@@ -503,4 +457,20 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// keyArgs renders a "?,?,…" placeholder list and the matching args for a set of
+// string keys, for building a parameterized IN/NOT IN clause. Caller guarantees
+// the set is non-empty (an empty IN () is invalid SQL).
+func keyArgs(set map[string]bool) (placeholders string, args []any) {
+	args = make([]any, 0, len(set))
+	var b strings.Builder
+	for k := range set {
+		if b.Len() > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('?')
+		args = append(args, k)
+	}
+	return b.String(), args
 }

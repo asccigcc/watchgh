@@ -85,6 +85,23 @@ func TestReconcileMarksAbsentThreadsRead(t *testing.T) {
 	}
 }
 
+func TestReconcileNotificationsEmptyActiveMarksAllRead(t *testing.T) {
+	s := testStore(t)
+	s.Upsert(ev("a", "t1", true))
+	s.Upsert(ev("b", "t2", true))
+
+	// An empty active set means nothing is unread on GitHub anymore.
+	if err := s.ReconcileNotifications(map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.List()
+	for _, e := range got {
+		if e.Unread {
+			t.Errorf("event %s should be reconciled to read", e.ID)
+		}
+	}
+}
+
 func TestOpenPRRosterUpsertsAndReconciles(t *testing.T) {
 	s := testStore(t)
 	pr := func(key, title string) OpenPR {
@@ -108,6 +125,14 @@ func TestOpenPRRosterUpsertsAndReconciles(t *testing.T) {
 	got, _ = s.OpenPRs()
 	if len(got) != 1 || got[0].Key != "acme/api#1" {
 		t.Fatalf("reconcile kept the wrong rows: %+v", got)
+	}
+
+	// No open PRs in the poll at all: the whole roster clears.
+	if err := s.ReconcileOpenPRs(map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.OpenPRs(); len(got) != 0 {
+		t.Fatalf("empty poll should clear the roster, got %+v", got)
 	}
 }
 
