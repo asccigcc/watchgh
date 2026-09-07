@@ -16,8 +16,8 @@ func TestDefaults(t *testing.T) {
 	if d.Retention != 7*24*time.Hour {
 		t.Errorf("Retention = %v, want 168h", d.Retention)
 	}
-	if d.PollFloor != 60*time.Second {
-		t.Errorf("PollFloor = %v, want 60s", d.PollFloor)
+	if d.PollFloor != 5*time.Minute {
+		t.Errorf("PollFloor = %v, want 5m", d.PollFloor)
 	}
 	if d.MenuRows != 5 {
 		t.Errorf("MenuRows = %d, want 5", d.MenuRows)
@@ -125,6 +125,7 @@ func TestParseRejectsBadValues(t *testing.T) {
 		`menu_rows = 0`,
 		`menu_rows = notanint`,
 		`poll_floor = "-5s"`,
+		`poll_floor = "10s"`, // below the MinPollFloor guardrail
 		`actionable_only_notify = maybe`,
 		`no equals sign`,
 	}
@@ -132,6 +133,16 @@ func TestParseRejectsBadValues(t *testing.T) {
 		if _, err := Parse(strings.NewReader(in)); err == nil {
 			t.Errorf("Parse(%q) = nil error, want error", in)
 		}
+	}
+}
+
+func TestParseAcceptsPollFloorAtMinimum(t *testing.T) {
+	c, err := Parse(strings.NewReader(`poll_floor = "30s"`))
+	if err != nil {
+		t.Fatalf("poll_floor at the minimum should be accepted: %v", err)
+	}
+	if c.PollFloor != MinPollFloor {
+		t.Errorf("PollFloor = %v, want %v", c.PollFloor, MinPollFloor)
 	}
 }
 

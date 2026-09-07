@@ -15,7 +15,11 @@ stale_after = "24h"
 retention = "7d"
 
 # Minimum spacing between polls, even if GitHub's X-Poll-Interval is lower.
-poll_floor = "60s"
+# The default is relaxed (5m) since desktop notifications pull you in and `R`
+# forces an on-demand refresh; lower it for snappier updates. Minimum is 30s —
+# the tracked-PR/review GraphQL polls key off this, so anything lower is
+# rejected to stay clear of GitHub's rate limits.
+poll_floor = "5m"
 
 # Max rows shown in the menu-bar dropdown before the "…N more" overflow line.
 menu_rows = 5

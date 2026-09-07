@@ -26,13 +26,20 @@ type Config struct {
 	NotifyActionableOnly bool          // desktop-notify actionable events only
 }
 
+// MinPollFloor is the smallest poll_floor we accept. The notification poll
+// already can't beat GitHub's X-Poll-Interval, but the tracked-PR and
+// review-state GraphQL polls run every tick with no server-side pacing, so the
+// floor is their only governor — this keeps a fat-fingered value from hammering
+// the API into GitHub's secondary rate limits.
+const MinPollFloor = 30 * time.Second
+
 // Defaults returns the built-in configuration used when no file (or no key) is
-// present. These mirror the constants they replaced.
+// present.
 func Defaults() Config {
 	return Config{
 		StaleAfter:           24 * time.Hour,
 		Retention:            7 * 24 * time.Hour,
-		PollFloor:            60 * time.Second,
+		PollFloor:            5 * time.Minute,
 		MenuRows:             5,
 		NotifyActionableOnly: true,
 	}
@@ -172,8 +179,8 @@ func (c Config) validate() error {
 		return errors.New("stale_after must be positive")
 	case c.Retention <= 0:
 		return errors.New("retention must be positive")
-	case c.PollFloor <= 0:
-		return errors.New("poll_floor must be positive")
+	case c.PollFloor < MinPollFloor:
+		return fmt.Errorf("poll_floor must be at least %s (guards against GitHub rate limits)", MinPollFloor)
 	case c.MenuRows < 1:
 		return errors.New("menu_rows must be at least 1")
 	}
