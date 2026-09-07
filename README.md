@@ -3,25 +3,32 @@
 A GitHub activity timeline for your terminal: the PRs, reviews, and CI runs that
 need you, in the order they arrive. A background daemon polls GitHub and posts
 desktop notifications; `wgh` shows the timeline in your terminal or the macOS
-menu bar. Auth piggybacks on your credentials — `GITHUB_TOKEN` if set, otherwise
-`gh auth token`.
+menu bar. Auth piggybacks on your credentials (`GITHUB_TOKEN` if set, otherwise
+`gh auth token`).
 
 ## Install
 
-macOS only. Builds from source (needs a Go toolchain and the Xcode command line
-tools) and installs both the `wgh` CLI/daemon and the `wgh-menu` menu bar app:
+macOS only. The installer downloads the prebuilt `wgh` binary from the latest
+GitHub release and drops it on your PATH. No Go toolchain required.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
 ```
 
-The CLI/daemon lands in `~/go/bin`, the app in `~/Applications`. Override the
-paths, or skip the app on a headless box:
+It installs to `/usr/local/bin/wgh` by default; set `BINDIR` to override, or
+`WGH_TAG` to pin a release:
 
 ```sh
-BINDIR=/usr/local/bin APPDIR=/Applications \
-  curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
-WGH_NO_MENU=1 bash install.sh   # CLI/daemon only
+BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
+```
+
+The menu bar app is optional. It uses cgo and must run from a `.app` bundle, so
+it can't ship as a bare binary; build it from source (needs a Go toolchain and
+the Xcode command line tools):
+
+```sh
+make menu            # build and launch wgh-menu (look for ◆ in the menu bar)
+make menu-uninstall  # quit and remove it
 ```
 
 ## Commands
@@ -34,9 +41,6 @@ wgh read 42          # mark item 42 read without opening
 wgh daemon install   # start the background poller via launchd (now + at login)
 wgh daemon status    # is it running? where are the plist and log?
 wgh daemon uninstall # stop and remove it
-
-make menu            # build and launch the menu bar app
-make menu-uninstall  # quit and remove it
 ```
 
 ## Interactive timeline
@@ -83,8 +87,7 @@ PRs, firing only on state transitions.
 `wgh-menu` reads the same store and shows unread items with a count badge
 (`◆ 3`); clicking a row opens it and marks it read. It never polls GitHub itself,
 and delegates open/mark-read to the `wgh` CLI, so the GitHub-sync logic lives in
-one place. It needs cgo and runs from a `.app` bundle, so it builds separately
-via the `Makefile` into `~/Applications/wgh-menu.app`.
+one place. It builds separately via `make menu` into `~/Applications/wgh-menu.app`.
 
 ## Configuration
 
@@ -101,4 +104,4 @@ days, unread items never.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

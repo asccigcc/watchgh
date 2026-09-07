@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 #
-# watchgh installer — builds and installs both pieces from source:
-#   1. the wgh CLI/daemon    -> $BINDIR (default ~/go/bin)
-#   2. the wgh-menu.app      -> $APPDIR (default ~/Applications), then launches it
+# watchgh installer. Downloads the prebuilt wgh CLI/daemon from the latest
+# GitHub release and installs it on your PATH. No Go toolchain required.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
 #
-# The menu bar app uses cgo, so a Go toolchain and the Xcode command line tools
-# are required. Override install locations or the source ref with env vars:
-#   BINDIR=/usr/local/bin APPDIR=/Applications WGH_REF=v1.2.3 bash install.sh
-#   WGH_NO_MENU=1   bash install.sh   # CLI/daemon only, skip the menu app
+# Override the install location or release tag with env vars:
+#   BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
+#
+# While the repo is private the anonymous URLs above return 404; run this from a
+# checkout (bash install.sh) with the GitHub CLI authenticated, and it fetches
+# the asset via gh instead.
 set -euo pipefail
 
-REPO="${WGH_REPO:-https://github.com/asccigcc/watchgh.git}"
-REF="${WGH_REF:-main}"
-BINDIR="${BINDIR:-$HOME/go/bin}"
-APPDIR="${APPDIR:-$HOME/Applications}"
-MIN_GO="1.27"
+REPO="${WGH_REPO:-asccigcc/watchgh}"
+TAG="${WGH_TAG:-latest}"
+BINDIR="${BINDIR:-/usr/local/bin}"
 
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 info() { printf '  %s\n' "$1"; }
@@ -27,47 +26,38 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 # --- preflight ------------------------------------------------------------
 [ "$(uname -s)" = "Darwin" ] || die "watchgh is macOS-only (needs launchd + the menu bar)."
-have git || die "git is required. Install the Xcode command line tools: xcode-select --install"
-have go  || die "Go is required. Install it from https://go.dev/dl or: brew install go"
+case "$(uname -m)" in
+  arm64)  ASSET="wgh-darwin-arm64" ;;
+  x86_64) ASSET="wgh-darwin-amd64" ;;
+  *)      die "unsupported architecture: $(uname -m)" ;;
+esac
 
-# Go must be new enough to build the module (go.mod pins $MIN_GO).
-gover="$(go env GOVERSION 2>/dev/null | sed 's/^go//')"
-if [ -n "$gover" ] && [ "$(printf '%s\n%s\n' "$MIN_GO" "$gover" | sort -V | head -1)" != "$MIN_GO" ]; then
-  die "Go $gover is too old; watchgh needs $MIN_GO or newer."
-fi
+# --- download -------------------------------------------------------------
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/watchgh.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
 
-# The menu app needs a C compiler (cgo). CLI/daemon is cgo-free, so this is only
-# fatal when we're building the menu.
-if [ -z "${WGH_NO_MENU:-}" ] && ! have cc && ! have clang; then
-  die "The menu app needs a C compiler. Run: xcode-select --install (or set WGH_NO_MENU=1)"
-fi
-
-# --- fetch source ---------------------------------------------------------
-# Build in place when run from a checkout; otherwise clone shallowly to a temp
-# dir we clean up on exit.
-SRC=""
-if [ -f "./go.mod" ] && head -1 ./go.mod | grep -q '^module watchgh'; then
-  SRC="$(pwd)"
+bold "Downloading $ASSET ($TAG)…"
+if have gh; then
+  # gh works with private repos (uses your auth). Empty tag = latest release.
+  gh release download "${TAG#latest}" --repo "$REPO" --pattern "$ASSET" --dir "$TMP" \
+    || die "download failed — is there a release with asset $ASSET on $REPO?"
 else
-  SRC="$(mktemp -d "${TMPDIR:-/tmp}/watchgh.XXXXXX")"
-  trap 'rm -rf "$SRC"' EXIT
-  bold "Fetching watchgh ($REF)…"
-  git clone --quiet --depth 1 --branch "$REF" "$REPO" "$SRC" \
-    || die "clone failed — is $REF a valid branch/tag on $REPO?"
+  # Anonymous fallback: only works once the repo (and release) is public.
+  url="https://github.com/$REPO/releases/latest/download/$ASSET"
+  [ "$TAG" != "latest" ] && url="https://github.com/$REPO/releases/download/$TAG/$ASSET"
+  curl -fSL --progress-bar "$url" -o "$TMP/$ASSET" \
+    || die "download failed — the repo may be private (install gh) or the tag may not exist."
 fi
 
-# --- build & install ------------------------------------------------------
-bold "Installing the CLI/daemon → $BINDIR"
-make -C "$SRC" install BINDIR="$BINDIR" >/dev/null
+# --- install --------------------------------------------------------------
+bold "Installing → $BINDIR/wgh"
+if [ -w "$BINDIR" ] || mkdir -p "$BINDIR" 2>/dev/null; then
+  install -m 0755 "$TMP/$ASSET" "$BINDIR/wgh"
+else
+  info "$BINDIR needs elevated permissions; using sudo"
+  sudo install -m 0755 "$TMP/$ASSET" "$BINDIR/wgh"
+fi
 info "installed $BINDIR/wgh"
-
-if [ -z "${WGH_NO_MENU:-}" ]; then
-  bold "Building the menu bar app → $APPDIR"
-  make -C "$SRC" menu-app BINDIR="$BINDIR" APPDIR="$APPDIR" >/dev/null
-  open "$APPDIR/wgh-menu.app"
-  info "launched wgh-menu — look for ◆ in the menu bar"
-  info "use its 'Start at Login' item to keep it running across reboots"
-fi
 
 # --- guidance -------------------------------------------------------------
 echo

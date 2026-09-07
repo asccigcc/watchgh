@@ -7,12 +7,23 @@
 BINDIR ?= $(HOME)/go/bin
 APPDIR ?= $(HOME)/Applications
 APP    := $(APPDIR)/wgh-menu.app
+DIST   ?= dist
 
-.PHONY: build install test icon menu-app menu menu-uninstall
+.PHONY: build install test release icon menu-app menu menu-uninstall
 
 # Build the pure-Go CLI/daemon binary in the working directory.
 build:
 	CGO_ENABLED=0 go build -o wgh ./cmd/wgh
+
+# Cross-compile the release binaries (both macOS arches) plus a checksum file
+# into $(DIST). The CLI/daemon is cgo-free, so this needs no C toolchain.
+# Upload these as GitHub release assets; install.sh downloads them.
+release:
+	@rm -rf "$(DIST)" && mkdir -p "$(DIST)"
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o "$(DIST)/wgh-darwin-arm64" ./cmd/wgh
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o "$(DIST)/wgh-darwin-amd64" ./cmd/wgh
+	cd "$(DIST)" && shasum -a 256 wgh-darwin-* > checksums.txt
+	@echo "built release binaries in $(DIST)/"
 
 # Install the CLI/daemon to $(BINDIR) (on PATH). The daemon runs this.
 install:
