@@ -19,10 +19,9 @@ import (
 // Config holds the thresholds that were previously hardcoded across the CLI and
 // renderer.
 type Config struct {
-	StaleAfter           time.Duration // unread + actionable older than this earns the DUE marker
-	Retention            time.Duration // prune read/resolved events older than this
-	PollFloor            time.Duration // spacing between background polls
-	NotifyActionableOnly bool          // desktop-notify actionable events only
+	StaleAfter time.Duration // unread + actionable older than this earns the DUE marker
+	Retention  time.Duration // prune read/resolved events older than this
+	PollFloor  time.Duration // spacing between background polls
 }
 
 // MinPollFloor is the smallest poll_floor we accept. The tracked-PR and
@@ -35,10 +34,9 @@ const MinPollFloor = 60 * time.Second
 // present.
 func Defaults() Config {
 	return Config{
-		StaleAfter:           24 * time.Hour,
-		Retention:            7 * 24 * time.Hour,
-		PollFloor:            5 * time.Minute,
-		NotifyActionableOnly: true,
+		StaleAfter: 24 * time.Hour,
+		Retention:  7 * 24 * time.Hour,
+		PollFloor:  5 * time.Minute,
 	}
 }
 
@@ -132,12 +130,6 @@ func (c *Config) set(key, val string) error {
 		return setDuration(&c.Retention, val)
 	case "poll_floor":
 		return setDuration(&c.PollFloor, val)
-	case "actionable_only_notify":
-		b, err := strconv.ParseBool(val)
-		if err != nil {
-			return fmt.Errorf("actionable_only_notify: %v", err)
-		}
-		c.NotifyActionableOnly = b
 	default:
 		// Ignore unknown keys so old binaries tolerate newer config files.
 	}

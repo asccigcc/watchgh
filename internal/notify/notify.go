@@ -30,6 +30,43 @@ func Send(title, message, url string) error {
 	return exec.CommandContext(ctx, "osascript", "-e", osaScript(title, message)).Run()
 }
 
+// HasGrouping reports whether terminal-notifier is installed — the notifier that
+// supports -group, which replaces a prior banner in place so a counter can tick
+// 2 → 3 rather than stack. Without it, callers fall back to a single, plain
+// osascript banner (which can neither replace nor be removed).
+func HasGrouping() bool {
+	_, err := exec.LookPath("terminal-notifier")
+	return err == nil
+}
+
+// SendGroup posts a notification tagged with group so that re-posting to the same
+// group replaces the previous banner in place — how a backlog counter updates
+// without piling up duplicate banners. Requires terminal-notifier; guard with
+// HasGrouping (it returns the lookup error otherwise).
+func SendGroup(title, message, group string) error {
+	path, err := exec.LookPath("terminal-notifier")
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, path,
+		"-title", title, "-message", message, "-group", group).Run()
+}
+
+// RemoveGroup clears any delivered notification for group (terminal-notifier
+// -remove), so a backlog that has cleared doesn't leave a stale count sitting in
+// Notification Center. Requires terminal-notifier; guard with HasGrouping.
+func RemoveGroup(group string) error {
+	path, err := exec.LookPath("terminal-notifier")
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, path, "-remove", group).Run()
+}
+
 // osaScript builds the AppleScript for a notification, escaping title and
 // message as AppleScript string literals. Without escaping, a value containing a
 // double quote would break out of the literal and inject arbitrary AppleScript.

@@ -356,15 +356,15 @@ func (t *tui) sync(c *github.Client, viewer string, notify bool, done chan<- syn
 	if fresh {
 		done <- syncResult{client: c, viewer: viewer, partial: true}
 	}
-	nf, nerr := syncNotifications(t.ctx, c, t.st, viewer)
-	tf, terr := syncTracked(t.ctx, c, t.st, viewer)
+	_, nerr := syncNotifications(t.ctx, c, t.st, viewer)
+	_, terr := syncTracked(t.ctx, c, t.st, viewer)
 	rerr := syncReviews(t.ctx, c, t.st)
 	t.st.Prune(t.ctx, cfg.Retention)
-	// Only the timer-driven poll notifies: on launch we'd alert on the whole
-	// backlog, and on a manual R you're already looking at the screen.
-	if notify {
-		notifyActionable(append(nf, tf...))
-	}
+	// Only the timer-driven self-poll (when the launchd poller is down) notifies:
+	// on launch we'd alert on the whole backlog, and on a manual R you're already
+	// looking at the screen. The silent passes still refresh the baseline so the
+	// next real alert compares against the true standing backlog.
+	notifyBacklog(t.ctx, t.st, notify)
 	done <- syncResult{client: c, viewer: viewer, warn: syncWarning(nerr, terr, rerr)}
 }
 

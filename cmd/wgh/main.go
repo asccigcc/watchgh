@@ -20,7 +20,6 @@ import (
 	"watchgh/internal/config"
 	"watchgh/internal/github"
 	"watchgh/internal/ingest"
-	"watchgh/internal/notify"
 	"watchgh/internal/store"
 	"watchgh/internal/timeline"
 	"watchgh/internal/tracker"
@@ -251,20 +250,6 @@ func persist(ctx context.Context, st *store.Store, events []timeline.Event) ([]t
 		}
 	}
 	return fresh, nil
-}
-
-// notifyActionable fires one desktop notification per new event. By default it
-// only notifies actionable events; setting actionable_only_notify = false in the
-// config makes it notify every fresh event.
-func notifyActionable(events []timeline.Event) {
-	for _, e := range events {
-		if cfg.NotifyActionableOnly && !e.Actionable {
-			continue
-		}
-		badge := e.Kind.Badge()
-		title := fmt.Sprintf("%s · %s", badge.Label, timeline.ShortRef(e.Repo, e.Number))
-		_ = notify.Send(title, e.Detail, e.URL)
-	}
 }
 
 func runMark(ctx context.Context, args []string, open bool) error {

@@ -37,23 +37,21 @@ func runPoll(ctx context.Context) error {
 	}
 }
 
-// pollOnce runs the three GitHub syncs, prunes, and — when notify is set —
-// posts a desktop notification per freshly-arrived actionable event. Failures
-// are logged (launchd routes them to the poller log) but never abort the loop.
+// pollOnce runs the three GitHub syncs, prunes, and refreshes the desktop
+// notification backlog. When notify is set it alerts on categories that grew
+// since the last pass; when it's clear (the cold-start pass) it only records the
+// baseline so we don't announce the whole standing backlog at once. Failures are
+// logged (launchd routes them to the poller log) but never abort the loop.
 func pollOnce(ctx context.Context, c *github.Client, st *store.Store, viewer string, notify bool) {
-	nf, err := syncNotifications(ctx, c, st, viewer)
-	if err != nil {
+	if _, err := syncNotifications(ctx, c, st, viewer); err != nil {
 		fmt.Fprintln(os.Stderr, "poll: notifications:", err)
 	}
-	tf, err := syncTracked(ctx, c, st, viewer)
-	if err != nil {
+	if _, err := syncTracked(ctx, c, st, viewer); err != nil {
 		fmt.Fprintln(os.Stderr, "poll: tracked:", err)
 	}
 	if err := syncReviews(ctx, c, st); err != nil {
 		fmt.Fprintln(os.Stderr, "poll: reviews:", err)
 	}
 	_ = st.Prune(ctx, cfg.Retention)
-	if notify {
-		notifyActionable(append(nf, tf...))
-	}
+	notifyBacklog(ctx, st, notify)
 }

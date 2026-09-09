@@ -50,8 +50,15 @@ else
 fi
 
 # --- install --------------------------------------------------------------
+# Elevate only when $BINDIR isn't writable by us. Testing -w (not the exit of
+# `mkdir -p`) is the crux: mkdir -p on an existing-but-unwritable dir like
+# /usr/local/bin succeeds, so gating on it would skip sudo and then `install`
+# would die with Permission denied.
 bold "Installing → $BINDIR/wgh"
-if [ -w "$BINDIR" ] || mkdir -p "$BINDIR" 2>/dev/null; then
+if [ ! -d "$BINDIR" ]; then
+  mkdir -p "$BINDIR" 2>/dev/null || sudo mkdir -p "$BINDIR" || die "could not create $BINDIR"
+fi
+if [ -w "$BINDIR" ]; then
   install -m 0755 "$TMP/$ASSET" "$BINDIR/wgh"
 else
   info "$BINDIR needs elevated permissions; using sudo"

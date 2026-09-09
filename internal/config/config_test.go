@@ -19,9 +19,6 @@ func TestDefaults(t *testing.T) {
 	if d.PollFloor != 5*time.Minute {
 		t.Errorf("PollFloor = %v, want 5m", d.PollFloor)
 	}
-	if !d.NotifyActionableOnly {
-		t.Errorf("NotifyActionableOnly = false, want true")
-	}
 }
 
 func TestParseFullOverlay(t *testing.T) {
@@ -29,7 +26,6 @@ func TestParseFullOverlay(t *testing.T) {
 stale_after   = "12h"
 retention     = "14d"
 poll_floor    = "90s"
-actionable_only_notify = false
 `
 	c, err := Parse(strings.NewReader(in))
 	if err != nil {
@@ -43,9 +39,6 @@ actionable_only_notify = false
 	}
 	if c.PollFloor != 90*time.Second {
 		t.Errorf("PollFloor = %v", c.PollFloor)
-	}
-	if c.NotifyActionableOnly {
-		t.Errorf("NotifyActionableOnly = true, want false")
 	}
 }
 
@@ -86,7 +79,7 @@ func TestParseDurationDays(t *testing.T) {
 func TestParseCommentsAndBlanks(t *testing.T) {
 	in := `
 # a full-line comment
-actionable_only_notify = false   # trailing comment
+stale_after = 12h   # trailing comment
 
 poll_floor = "60s"
 `
@@ -94,8 +87,8 @@ poll_floor = "60s"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.NotifyActionableOnly {
-		t.Errorf("NotifyActionableOnly = true, want false (trailing comment not stripped?)")
+	if c.StaleAfter != 12*time.Hour {
+		t.Errorf("StaleAfter = %v, want 12h (trailing comment not stripped?)", c.StaleAfter)
 	}
 	if c.PollFloor != 60*time.Second {
 		t.Errorf("PollFloor = %v", c.PollFloor)
@@ -117,7 +110,6 @@ func TestParseRejectsBadValues(t *testing.T) {
 		`stale_after = "banana"`,
 		`poll_floor = "-5s"`,
 		`poll_floor = "10s"`, // below the MinPollFloor guardrail
-		`actionable_only_notify = maybe`,
 		`no equals sign`,
 	}
 	for _, in := range bad {

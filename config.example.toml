@@ -21,6 +21,8 @@ retention = "7d"
 # clear of GitHub's rate limits.
 poll_floor = "5m"
 
-# Desktop-notify only actionable events (review requested, assigned, changes
-# requested, CI failed). Set false to be notified about every new event.
-actionable_only_notify = true
+# Desktop notifications are coalesced per category as running counts of what
+# awaits you — e.g. "3 reviews requested", "2 PRs failing CI" — and re-alert only
+# when a count grows; open wgh to see the items. Installing terminal-notifier
+# (`brew install terminal-notifier`) lets each counter update its banner in place
+# rather than fall back to a single summary banner.

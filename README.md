@@ -3,9 +3,9 @@
 A GitHub activity timeline for your terminal: the PRs, reviews, and CI runs that
 need you, in the order they arrive. `wgh` shows the timeline in your terminal
 and installs a launchd background poller that keeps GitHub in sync and posts
-desktop notifications for actionable events, even when no window is open. Auth
-piggybacks on your credentials (`GITHUB_TOKEN` if set, otherwise
-`gh auth token`).
+coalesced desktop notifications — running counts of what awaits you — even when
+no window is open. Auth piggybacks on your credentials (`GITHUB_TOKEN` if set,
+otherwise `gh auth token`).
 
 ## Install
 
@@ -65,19 +65,23 @@ counts:
 The first time you open `wgh` it installs a launchd agent
 (`com.watchgh.poller`) that runs `wgh` headless in the background. launchd keeps
 it alive across logins and reboots, so it polls GitHub on the poll-floor cadence
-and posts desktop notifications for actionable events (review requested,
-assigned, changes requested, CI failed) even when no window is open. Its first
-pass is silent so a cold start doesn't alert on the whole backlog; after that
-only genuinely new events notify. CI and blocked events come from a GraphQL poll
-of your open and assigned PRs, firing only on state transitions.
+and posts desktop notifications even when no window is open. Notifications are
+**coalesced per category** into running counts of what awaits you — "3 reviews
+requested", "2 PRs assigned to you", "2 PRs failing CI", "1 PR blocked", "2 PRs
+need your reply" — rather than one banner per event. A category re-alerts only
+when its count grows; open wgh to see the items, and the count clears as you
+handle them. Its first pass is silent so a cold start doesn't alert on the whole
+backlog. CI and blocked counts come from a GraphQL poll of your open PRs.
 
 ```sh
 wgh stop   # unload the poller and remove its agent
 wgh        # opening wgh again re-installs and starts it
 ```
 
-Notification delivery uses `terminal-notifier` if installed (click to open the
-item), otherwise the built-in `osascript`. Because the poller runs under
+Notification delivery uses `terminal-notifier` if installed, which lets each
+category's counter update its banner in place (`brew install terminal-notifier`);
+without it, wgh falls back to a single summary banner via the built-in
+`osascript`. Because the poller runs under
 launchd — which starts with a minimal environment — it resolves your token via
 `gh auth token`; make sure the GitHub CLI is authenticated (`gh auth login`).
 Its output goes to `~/Library/Application Support/watchgh/poller.log`.

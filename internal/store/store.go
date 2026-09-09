@@ -60,6 +60,12 @@ CREATE TABLE IF NOT EXISTS open_prs (
   updated_at  INTEGER,
   last_seen   INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS notify_state (
+  category   TEXT PRIMARY KEY,
+  count      INTEGER,
+  updated_at INTEGER
+);
 `
 
 // DefaultPath is the per-user database location (~/.config/watchgh/watchgh.db).
