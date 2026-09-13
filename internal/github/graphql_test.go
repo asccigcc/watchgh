@@ -1,6 +1,58 @@
 package github
 
-import "testing"
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestSplitRepo(t *testing.T) {
+	cases := []struct {
+		in          string
+		owner, name string
+		ok          bool
+	}{
+		{"acme/api", "acme", "api", true},
+		{"acme", "", "", false},  // no slash
+		{"acme/", "", "", false}, // empty name
+		{"/api", "", "", false},  // empty owner
+		{"a/b/c", "", "", false}, // nested path, not a repo
+	}
+	for _, tc := range cases {
+		owner, name, ok := splitRepo(tc.in)
+		if ok != tc.ok || owner != tc.owner || name != tc.name {
+			t.Errorf("splitRepo(%q) = (%q,%q,%v), want (%q,%q,%v)",
+				tc.in, owner, name, ok, tc.owner, tc.name, tc.ok)
+		}
+	}
+}
+
+func TestPRStatesResolvesAndToleratesNulls(t *testing.T) {
+	// Aliases a0/a1/a2 map to the three requested PRs; the middle one resolves to
+	// null (deleted / access lost) and must be omitted, not fail the batch.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"data":{
+			"a0":{"pullRequest":{"state":"MERGED"}},
+			"a1":{"pullRequest":null},
+			"a2":{"pullRequest":{"state":"OPEN"}}
+		}}`)
+	}))
+	defer srv.Close()
+
+	refs := []PRRef{{"acme/api", 1}, {"acme/api", 2}, {"acme/web", 3}}
+	got, err := testClient(srv).PRStates(context.Background(), refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["acme/api#1"] != "MERGED" || got["acme/web#3"] != "OPEN" {
+		t.Errorf("resolved states = %v, want #1 MERGED and #3 OPEN", got)
+	}
+	if _, ok := got["acme/api#2"]; ok {
+		t.Errorf("null PR should be omitted, got %q", got["acme/api#2"])
+	}
+}
 
 func TestToReviewState(t *testing.T) {
 	mk := func(head, reviewOID, state string, hasReview bool) reviewNode {

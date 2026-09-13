@@ -37,7 +37,7 @@ func runPoll(ctx context.Context) error {
 	}
 }
 
-// pollOnce runs the three GitHub syncs, prunes, and refreshes the desktop
+// pollOnce runs the GitHub syncs, reaps merged/closed PRs, prunes, and refreshes the desktop
 // notification backlog. When notify is set it alerts on categories that grew
 // since the last pass; when it's clear (the cold-start pass) it only records the
 // baseline so we don't announce the whole standing backlog at once. Failures are
@@ -51,6 +51,9 @@ func pollOnce(ctx context.Context, c *github.Client, st *store.Store, viewer str
 	}
 	if err := syncReviews(ctx, c, st); err != nil {
 		fmt.Fprintln(os.Stderr, "poll: reviews:", err)
+	}
+	if err := syncClosed(ctx, c, st); err != nil {
+		fmt.Fprintln(os.Stderr, "poll: closed:", err)
 	}
 	_ = st.Prune(ctx, cfg.Retention)
 	notifyBacklog(ctx, st, notify)

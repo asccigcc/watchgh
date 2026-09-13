@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -208,6 +209,97 @@ func (n reviewNode) toReviewState() (ReviewState, bool) {
 		AtHead: n.ViewerLatestReview.Commit.Oid == head,
 		State:  n.ViewerLatestReview.State,
 	}, true
+}
+
+// PRRef identifies a pull request by its repo and number — the pair stored
+// rows carry, and all PRStates needs to look up a PR's lifecycle state.
+type PRRef struct {
+	Repo   string // owner/name
+	Number int
+}
+
+// Key is the "owner/name#number" string used to key a PR across the store and
+// the github client, so a lookup result maps back to the row that asked for it.
+func (r PRRef) Key() string { return fmt.Sprintf("%s#%d", r.Repo, r.Number) }
+
+// PRStates looks up the lifecycle state (OPEN, CLOSED, MERGED) of each PR,
+// keyed by PRRef.Key(). It batches the lookups into aliased repository queries
+// (50 per request) so watchgh can reap rows for PRs that have since merged or
+// closed without a per-PR round trip. A PR that can't be resolved (deleted, or
+// access lost) is simply omitted rather than failing the batch, so a single
+// dead reference never blocks reaping the rest.
+func (c *Client) PRStates(ctx context.Context, refs []PRRef) (map[string]string, error) {
+	out := make(map[string]string, len(refs))
+	const batch = 50
+	for start := 0; start < len(refs); start += batch {
+		end := start + batch
+		if end > len(refs) {
+			end = len(refs)
+		}
+		if err := c.prStatesBatch(ctx, refs[start:end], out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// prStatesBatch resolves one ≤50-PR chunk, writing resolved states into out.
+func (c *Client) prStatesBatch(ctx context.Context, chunk []PRRef, out map[string]string) error {
+	var head, body strings.Builder
+	head.WriteString("query(")
+	vars := map[string]any{}
+	valid := make([]PRRef, 0, len(chunk))
+	for _, r := range chunk {
+		owner, name, ok := splitRepo(r.Repo)
+		if !ok {
+			continue
+		}
+		i := len(valid)
+		valid = append(valid, r)
+		if i > 0 {
+			head.WriteString(", ")
+		}
+		fmt.Fprintf(&head, "$o%d:String!, $n%d:String!, $p%d:Int!", i, i, i)
+		fmt.Fprintf(&body, " a%d: repository(owner:$o%d, name:$n%d){ pullRequest(number:$p%d){ state } }", i, i, i, i)
+		vars[fmt.Sprintf("o%d", i)] = owner
+		vars[fmt.Sprintf("n%d", i)] = name
+		vars[fmt.Sprintf("p%d", i)] = r.Number
+	}
+	if len(valid) == 0 {
+		return nil
+	}
+	head.WriteString(") {")
+	query := head.String() + body.String() + " }"
+
+	var resp struct {
+		Data map[string]*struct {
+			PullRequest *struct {
+				State string `json:"state"`
+			} `json:"pullRequest"`
+		} `json:"data"`
+		// Errors are ignored on purpose: GitHub returns partial data with a
+		// per-node error for an unresolvable PR, and a null node just means
+		// "unknown" — we only reap on an explicit MERGED/CLOSED, never on absence.
+	}
+	if err := c.graphql(ctx, query, vars, &resp); err != nil {
+		return err
+	}
+	for i, r := range valid {
+		if node := resp.Data[fmt.Sprintf("a%d", i)]; node != nil && node.PullRequest != nil {
+			out[r.Key()] = node.PullRequest.State
+		}
+	}
+	return nil
+}
+
+// splitRepo splits an "owner/name" repo into its parts, reporting ok=false for
+// anything that isn't exactly one slash-separated pair.
+func splitRepo(repo string) (owner, name string, ok bool) {
+	i := strings.IndexByte(repo, '/')
+	if i <= 0 || i == len(repo)-1 || strings.IndexByte(repo[i+1:], '/') >= 0 {
+		return "", "", false
+	}
+	return repo[:i], repo[i+1:], true
 }
 
 // pageInfo is the cursor slice of a GraphQL connection.

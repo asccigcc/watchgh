@@ -121,6 +121,9 @@ func runList(ctx context.Context) error {
 	if err := syncReviews(ctx, c, st); err != nil {
 		fmt.Fprintln(os.Stderr, dim("⚠ review-state poll failed: "+err.Error()))
 	}
+	if err := syncClosed(ctx, c, st); err != nil {
+		fmt.Fprintln(os.Stderr, dim("⚠ closed-PR reap failed: "+err.Error()))
+	}
 	if err := st.Prune(ctx, cfg.Retention); err != nil {
 		return fmt.Errorf("pruning: %w", err)
 	}
@@ -146,7 +149,7 @@ func syncNotifications(ctx context.Context, c *github.Client, st *store.Store, v
 		return nil, fmt.Errorf("fetching notifications: %w", err)
 	}
 	notes = keepSignal(notes)
-	events := enrichAll(ctx, c, notes, viewer)
+	events := withoutClosedPRs(ctx, c, enrichAll(ctx, c, notes, viewer))
 
 	fresh, err := persist(ctx, st, events)
 	if err != nil {
@@ -220,6 +223,94 @@ func syncReviews(ctx context.Context, c *github.Client, st *store.Store) error {
 		verdicts[i] = store.ReviewState{Repo: rs.Repo, Number: rs.Number, AtHead: rs.AtHead, State: rs.State}
 	}
 	return st.ReconcileReviewRequests(ctx, verdicts)
+}
+
+// deadPRs returns the subset of refs whose PR has merged or closed, as a set
+// keyed by "owner/name#number". A PR whose state can't be resolved is treated as
+// live and never appears here, so a lookup miss never reaps or drops a real PR.
+func deadPRs(ctx context.Context, c *github.Client, refs []github.PRRef) (map[string]bool, error) {
+	states, err := c.PRStates(ctx, refs)
+	if err != nil {
+		return nil, err
+	}
+	dead := make(map[string]bool)
+	for key, state := range states {
+		if state == "MERGED" || state == "CLOSED" {
+			dead[key] = true
+		}
+	}
+	return dead, nil
+}
+
+// withoutClosedPRs drops events for PRs that have merged or closed, so a dead
+// PR's still-unread notification isn't re-ingested on every poll only to be
+// reaped again afterward — the churn that lets a merged PR flicker back into the
+// list. Best-effort: if the state lookup fails it returns the events unchanged
+// and leaves syncClosed's stored-row reap as the backstop.
+func withoutClosedPRs(ctx context.Context, c *github.Client, events []timeline.Event) []timeline.Event {
+	refs := prRefsOf(events)
+	if len(refs) == 0 {
+		return events
+	}
+	dead, err := deadPRs(ctx, c, refs)
+	if err != nil || len(dead) == 0 {
+		return events
+	}
+	kept := events[:0]
+	for _, e := range events {
+		if e.Number > 0 && dead[(github.PRRef{Repo: e.Repo, Number: e.Number}).Key()] {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return kept
+}
+
+// prRefsOf collects the distinct PR references (Number > 0) carried by events.
+func prRefsOf(events []timeline.Event) []github.PRRef {
+	seen := make(map[string]bool)
+	var refs []github.PRRef
+	for _, e := range events {
+		if e.Number == 0 || e.Repo == "" {
+			continue
+		}
+		r := github.PRRef{Repo: e.Repo, Number: e.Number}
+		if key := r.Key(); !seen[key] {
+			seen[key] = true
+			refs = append(refs, r)
+		}
+	}
+	return refs
+}
+
+// syncClosed reaps stored rows for PRs that have since merged or closed. It is
+// the backstop to withoutClosedPRs's ingest-time filter: it clears CI-tab rows
+// (which arrive from the tracked-PR poll, not notifications) and anything a
+// flaky poll let through, deleting the dead PRs from all tabs. It emits no
+// events, so it returns nothing but an error.
+func syncClosed(ctx context.Context, c *github.Client, st *store.Store) error {
+	refs, err := st.DistinctPRs(ctx)
+	if err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	ghRefs := make([]github.PRRef, len(refs))
+	for i, r := range refs {
+		ghRefs[i] = github.PRRef{Repo: r.Repo, Number: r.Number}
+	}
+	dead, err := deadPRs(ctx, c, ghRefs)
+	if err != nil {
+		return err
+	}
+	var reap []store.PRRef
+	for _, r := range refs {
+		if dead[(github.PRRef{Repo: r.Repo, Number: r.Number}).Key()] {
+			reap = append(reap, r)
+		}
+	}
+	return st.ReapPRs(ctx, reap)
 }
 
 // toOpenPR maps a fetched PR to its roster row.

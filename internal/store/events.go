@@ -173,6 +173,55 @@ func (s *Store) ReconcileNotifications(ctx context.Context, activeThreadIDs map[
 	return err
 }
 
+// PRRef identifies a pull request the store holds rows for, so its lifecycle
+// state can be looked up and its rows reaped once it merges or closes.
+type PRRef struct {
+	Repo   string // owner/name
+	Number int
+}
+
+// DistinctPRs returns every (repo, number) pair the events table references, so
+// a poll can look up their states and reap the ones that have merged or closed.
+// Rows without a PR number (number 0) carry no PR to check and are skipped.
+func (s *Store) DistinctPRs(ctx context.Context) ([]PRRef, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT repo, number FROM events WHERE number > 0 AND repo <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PRRef
+	for rows.Next() {
+		var r PRRef
+		if err := rows.Scan(&r.Repo, &r.Number); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ReapPRs deletes every event for the given PRs — the store's way of dropping a
+// merged or closed PR from all tabs at once, since a dead PR is no longer
+// actionable anywhere. Idempotent: PRs with no remaining rows delete nothing.
+func (s *Store) ReapPRs(ctx context.Context, refs []PRRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, r := range refs {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM events WHERE repo=? AND number=?`, r.Repo, r.Number); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // Prune removes read/resolved events older than maxAge, never touching items
 // that are still unread.
 func (s *Store) Prune(ctx context.Context, maxAge time.Duration) error {

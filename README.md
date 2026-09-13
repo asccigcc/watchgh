@@ -122,7 +122,9 @@ The poll floor sets the background poll cadence; it defaults to `5m` (minimum
 tighter polling rarely pays for the extra API traffic. State lives in a SQLite DB
 under
 `~/Library/Application Support/watchgh/watchgh.db`; read items are pruned after 30
-days (configurable via `retention`), unread items never.
+days (configurable via `retention`), unread items never. PRs that merge or close
+are dropped from every tab on the next poll, so a dead PR never lingers in Read
+waiting out the retention window.
 
 ## License
 

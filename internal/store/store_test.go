@@ -377,6 +377,51 @@ func TestReconcileReviewRequestsLeavesOtherKindsAlone(t *testing.T) {
 	}
 }
 
+func TestReapPRsDeletesAllRowsForDeadPRs(t *testing.T) {
+	s := testStore(t)
+	// Two PRs: #1 (a review request + its CI lane) merges; #2 stays open.
+	s.Upsert(bg, ev("a", "t1", true)) // acme/api#1 notification
+	s.Upsert(bg, timeline.Event{ID: "acme/api#1:ci", Source: "graphql", TS: time.Now(),
+		Kind: timeline.KindCIPassed, Repo: "acme/api", Number: 1, Detail: "passed", Unread: true})
+	live := ev("b", "t2", true)
+	live.Number = 2
+	s.Upsert(bg, live)
+
+	if err := s.ReapPRs(bg, []PRRef{{Repo: "acme/api", Number: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.List(bg)
+	if len(got) != 1 || got[0].Number != 2 {
+		t.Fatalf("reap should delete every row for #1 across tabs and keep #2, got %+v", got)
+	}
+
+	// Idempotent: reaping a PR with no rows left is a no-op.
+	if err := s.ReapPRs(bg, []PRRef{{Repo: "acme/api", Number: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.List(bg); len(again) != 1 {
+		t.Fatalf("second reap changed row count to %d, want 1", len(again))
+	}
+}
+
+func TestDistinctPRsSkipsNumberlessRows(t *testing.T) {
+	s := testStore(t)
+	s.Upsert(bg, ev("a", "t1", true)) // acme/api#1
+	dup := ev("a2", "t3", true)       // same acme/api#1, must dedupe in the result
+	s.Upsert(bg, dup)
+	numberless := ev("n", "t2", true)
+	numberless.Number = 0
+	s.Upsert(bg, numberless)
+
+	refs, err := s.DistinctPRs(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0] != (PRRef{Repo: "acme/api", Number: 1}) {
+		t.Fatalf("want one distinct PR ref acme/api#1, got %+v", refs)
+	}
+}
+
 func TestPruneKeepsUnreadRemovesOldRead(t *testing.T) {
 	s := testStore(t)
 	s.Upsert(bg, ev("keep", "t1", true))  // unread -> must survive
