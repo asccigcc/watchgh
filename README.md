@@ -50,9 +50,6 @@ always fetches the latest release:
 curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
 ```
 
-(While the repo is private, run `bash install.sh` from a checkout with the
-GitHub CLI signed in, or pin a build with `WGH_TAG=v0.5.0`.)
-
 Then **restart the background poller** so it runs the new binary:
 
 ```sh
