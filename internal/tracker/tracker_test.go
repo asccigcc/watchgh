@@ -77,6 +77,28 @@ func TestBlockedAndUnblocked(t *testing.T) {
 	}
 }
 
+func TestEventIDStablePerLane(t *testing.T) {
+	// Two CI transitions on the same PR must share one id (the "ci" lane), so the
+	// store keeps a single up-to-date row per lane rather than a growing history;
+	// the merge lane carries its own stable id.
+	prev := store.PRState{HeadSHA: "sha1", CIState: "PENDING", MergeState: "CLEAN"}
+	first, next := Diff(prev, true, pr("FAILURE", "CLEAN", "me"), "me", time.Now())
+	p2 := pr("SUCCESS", "CLEAN", "me")
+	p2.HeadSHA = "sha2" // a re-run on a new head
+	second, _ := Diff(next, true, p2, "me", time.Now().Add(time.Minute))
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("want one CI event each, got %d and %d", len(first), len(second))
+	}
+	if first[0].ID != "acme/api#1:ci" || second[0].ID != first[0].ID {
+		t.Errorf("ci ids = %q, %q; want both %q", first[0].ID, second[0].ID, "acme/api#1:ci")
+	}
+	blocked, _ := Diff(next, true, pr("SUCCESS", "BLOCKED", "me"), "me", time.Now())
+	last := blocked[len(blocked)-1] // ci event precedes the merge event
+	if last.ID != "acme/api#1:merge" {
+		t.Errorf("merge id = %q, want acme/api#1:merge", last.ID)
+	}
+}
+
 func TestUnknownMergeStateIgnored(t *testing.T) {
 	prev := store.PRState{HeadSHA: "sha1", CIState: "SUCCESS", MergeState: "CLEAN"}
 	evs, next := Diff(prev, true, pr("SUCCESS", "UNKNOWN", "me"), "me", time.Now())

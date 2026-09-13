@@ -16,6 +16,9 @@ func Backfill(ctx context.Context, st *store.Store) error {
 	if err := st.CollapseNotificationThreads(ctx); err != nil {
 		return err
 	}
+	if err := st.CollapseGraphqlLanes(ctx); err != nil {
+		return err
+	}
 	return st.BackfillDetails(ctx, DetailBackfill())
 }
 

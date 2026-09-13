@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,8 +23,9 @@ INSERT INTO events
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
   read_at=CASE WHEN excluded.ts > events.ts THEN NULL ELSE events.read_at END,
-  ts=excluded.ts, detail=excluded.detail, github_unread=excluded.github_unread,
-  actionable=excluded.actionable, last_seen=excluded.last_seen`
+  kind=excluded.kind, ts=excluded.ts, detail=excluded.detail,
+  github_unread=excluded.github_unread, actionable=excluded.actionable,
+  last_seen=excluded.last_seen`
 
 // execer is the write surface shared by *sql.DB and *sql.Tx, so one upsert body
 // serves both the single and batched paths.
@@ -233,6 +235,85 @@ WHERE source='notification'
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE events SET id=thread_id WHERE source='notification' AND id<>thread_id`); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+// graphqlLane maps a tracked-PR event kind to the channel its stable id encodes.
+// It mirrors the channel argument tracker.base emits, so the migration below can
+// reconstruct each legacy row's target id from its kind.
+func graphqlLane(k timeline.Kind) string {
+	switch k {
+	case timeline.KindCIPassed, timeline.KindCIFailed:
+		return "ci"
+	case timeline.KindBlocked, timeline.KindUnblocked:
+		return "merge"
+	default:
+		return "other"
+	}
+}
+
+// CollapseGraphqlLanes is the tracked-PR analogue of CollapseNotificationThreads.
+// The old tracker id embedded the detection nanosecond, so every CI/merge
+// transition minted a fresh row — and since those rows are unread, Prune never
+// reclaimed them, so a PR's status history piled up unbounded. This folds each
+// PR's graphql rows to one per lane (its latest ci row and latest merge row) and
+// rewrites the survivor's id to the stable "repo#num:lane" the tracker now emits,
+// so future transitions upsert onto it. Idempotent.
+func (s *Store) CollapseGraphqlLanes(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT seq, repo, number, kind, ts FROM events WHERE source='graphql'`)
+	if err != nil {
+		return err
+	}
+	type winner struct{ seq, ts int64 }
+	best := map[string]winner{} // stable id -> latest row so far
+	for rows.Next() {
+		var seq, ts int64
+		var repo string
+		var number, kind int
+		if err := rows.Scan(&seq, &repo, &number, &kind, &ts); err != nil {
+			rows.Close()
+			return err
+		}
+		id := fmt.Sprintf("%s#%d:%s", repo, number, graphqlLane(timeline.Kind(kind)))
+		if w, ok := best[id]; !ok || ts > w.ts || (ts == w.ts && seq > w.seq) {
+			best[id] = winner{seq: seq, ts: ts}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if len(best) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Drop every graphql row that isn't a lane winner, then rename the winners to
+	// the stable id. Deleting first guarantees each target id ends up unique.
+	keep := make(map[int64]string, len(best))
+	ph := make([]string, 0, len(best))
+	args := make([]any, 0, len(best))
+	for id, w := range best {
+		keep[w.seq] = id
+		ph = append(ph, "?")
+		args = append(args, w.seq)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM events WHERE source='graphql' AND seq NOT IN (`+strings.Join(ph, ",")+`)`,
+		args...); err != nil {
+		return err
+	}
+	for seq, id := range keep {
+		if _, err := tx.ExecContext(ctx, `UPDATE events SET id=? WHERE seq=?`, id, seq); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -127,6 +127,68 @@ func TestCollapseNotificationThreads(t *testing.T) {
 	}
 }
 
+func TestUpsertRefreshesKindOnTransition(t *testing.T) {
+	// A tracked-PR lane row keeps a stable id and transitions between kinds
+	// (failed→passed); the upsert must refresh kind, not just detail/ts.
+	s := testStore(t)
+	e := timeline.Event{ID: "acme/api#1:ci", Source: "graphql", TS: time.Now(),
+		Kind: timeline.KindCIFailed, Repo: "acme/api", Number: 1, Detail: "CI failed", Unread: true}
+	s.Upsert(bg, e)
+	e.TS = e.TS.Add(time.Hour)
+	e.Kind = timeline.KindCIPassed
+	e.Detail = "passed"
+	s.Upsert(bg, e)
+
+	got, _ := s.List(bg)
+	if len(got) != 1 || got[0].Kind != timeline.KindCIPassed || got[0].Detail != "passed" {
+		t.Fatalf("transition should update the single row's kind/detail, got %+v", got)
+	}
+}
+
+func TestCollapseGraphqlLanes(t *testing.T) {
+	s := testStore(t)
+	start := time.Now()
+	gql := func(id string, kind timeline.Kind, ts time.Time, repo string, num int, detail string) timeline.Event {
+		return timeline.Event{ID: id, Source: "graphql", TS: ts, Kind: kind,
+			Repo: repo, Number: num, Detail: detail, Unread: true}
+	}
+	// Legacy per-transition rows for one PR: two "ci" versions + one "merge".
+	s.Upsert(bg, gql("acme/api#1:ci:sha1:FAILURE@1", timeline.KindCIFailed, start, "acme/api", 1, "old"))
+	s.Upsert(bg, gql("acme/api#1:ci:sha2:SUCCESS@2", timeline.KindCIPassed, start.Add(time.Hour), "acme/api", 1, "passed"))
+	s.Upsert(bg, gql("acme/api#1:merge:BLOCKED@3", timeline.KindBlocked, start.Add(2*time.Hour), "acme/api", 1, "blocked"))
+	// A second PR's lone ci row.
+	s.Upsert(bg, gql("acme/api#2:ci:x@4", timeline.KindCIPassed, start, "acme/api", 2, "passed"))
+
+	if err := s.CollapseGraphqlLanes(bg); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.List(bg)
+	byID := map[string]timeline.Event{}
+	for _, e := range got {
+		byID[e.ID] = e
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 lane rows (PR1 ci+merge, PR2 ci), got %d: %v", len(got), byID)
+	}
+	if e := byID["acme/api#1:ci"]; e.Detail != "passed" {
+		t.Errorf("ci survivor detail = %q, want the latest 'passed'", e.Detail)
+	}
+	if _, ok := byID["acme/api#1:merge"]; !ok {
+		t.Error("merge lane should survive independently of the ci lane")
+	}
+	if _, ok := byID["acme/api#2:ci"]; !ok {
+		t.Error("the second PR's ci lane should survive")
+	}
+
+	// Idempotent: a second run touches nothing.
+	if err := s.CollapseGraphqlLanes(bg); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.List(bg); len(again) != 3 {
+		t.Fatalf("second run changed row count to %d, want 3", len(again))
+	}
+}
+
 func TestMarkReadClearsUnread(t *testing.T) {
 	s := testStore(t)
 	s.Upsert(bg, ev("a", "t1", true))

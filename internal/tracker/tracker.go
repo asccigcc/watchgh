@@ -76,7 +76,7 @@ func ciEvent(pr github.TrackedPR, isMine bool, now time.Time) timeline.Event {
 		kind = timeline.KindCIFailed
 		detail = "CI failed"
 	}
-	e := base(pr, isMine, now, "ci", pr.HeadSHA+":"+pr.CIState)
+	e := base(pr, isMine, now, "ci")
 	e.Kind = kind
 	e.Detail = detail
 	e.Actionable = kind == timeline.KindCIFailed && isMine
@@ -88,7 +88,7 @@ func blockedEvent(pr github.TrackedPR, isMine bool, now time.Time) timeline.Even
 	if pr.MergeState == "DIRTY" {
 		detail = "merge conflict"
 	}
-	e := base(pr, isMine, now, "merge", pr.MergeState)
+	e := base(pr, isMine, now, "merge")
 	e.Kind = timeline.KindBlocked
 	e.Detail = detail
 	e.Actionable = true
@@ -96,21 +96,25 @@ func blockedEvent(pr github.TrackedPR, isMine bool, now time.Time) timeline.Even
 }
 
 func unblockedEvent(pr github.TrackedPR, isMine bool, now time.Time) timeline.Event {
-	e := base(pr, isMine, now, "merge", pr.MergeState)
+	e := base(pr, isMine, now, "merge")
 	e.Kind = timeline.KindUnblocked
 	e.Detail = "unblocked"
 	return e
 }
 
-// base builds the common event fields. The id embeds the detection time so a
-// repeated transition (e.g. blocked → clean → blocked) is a distinct event.
-func base(pr github.TrackedPR, isMine bool, now time.Time, channel, discriminator string) timeline.Event {
+// base builds the common event fields. The id is stable per (PR, channel) — one
+// "ci" row and one "merge" row per PR — so a later transition upserts onto that
+// same row (refreshing kind/detail/ts and re-surfacing it as unread) instead of
+// minting a fresh row per change, which used to pile up unbounded, never-pruned
+// history. Diff only calls this on a real transition, so the row's content
+// always reflects the latest status.
+func base(pr github.TrackedPR, isMine bool, now time.Time, channel string) timeline.Event {
 	author := pr.Author
 	if isMine {
 		author = ""
 	}
 	return timeline.Event{
-		ID:     fmt.Sprintf("%s:%s:%s@%d", key(pr), channel, discriminator, now.UnixNano()),
+		ID:     fmt.Sprintf("%s:%s", key(pr), channel),
 		Source: "graphql",
 		TS:     now,
 		Repo:   pr.Repo,
