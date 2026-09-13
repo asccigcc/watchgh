@@ -1,0 +1,43 @@
+# The same gauntlet run by hand before every commit, enforced on PRs and pushes
+# to main: format, vet, build (cgo-free, as the CLI ships), test, and a race
+# pass. It's a free filter — unformatted or broken contributions fail here
+# before they reach a human review.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"
+            exit 1
+          fi
+
+      - name: build (cgo-free)
+        run: CGO_ENABLED=0 go build ./cmd/wgh/... ./internal/...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./...
+
+      - name: test (race)
+        run: go test -race ./...

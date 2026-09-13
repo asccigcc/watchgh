@@ -1,0 +1,24 @@
+name: Idea / feature request
+description: Suggest an improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        watchgh is a solo pet project, so I can't promise to build everything —
+        but I'm happy to hear ideas. If it's something you'd like to implement
+        yourself, say so and open a PR (see CONTRIBUTING.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that watchgh makes hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What would you like it to do instead?
+    validations:
+      required: true

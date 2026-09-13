@@ -7,6 +7,11 @@ coalesced desktop notifications — running counts of what awaits you — even w
 no window is open. Auth piggybacks on your credentials (`GITHUB_TOKEN` if set,
 otherwise `gh auth token`).
 
+> **Status:** a personal pet project, maintained solo and as time allows. Shared
+> in case it's useful. Issues and pull requests are welcome — I review them when
+> I can, so replies may be slow, and small, focused changes get merged fastest.
+> See [CONTRIBUTING.md](CONTRIBUTING.md). Fork it freely under MIT.
+
 ## Install
 
 macOS only. The installer downloads the prebuilt `wgh` binary from the latest

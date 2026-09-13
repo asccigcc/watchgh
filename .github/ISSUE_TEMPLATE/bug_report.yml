@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in watchgh isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! watchgh is a solo pet project, so replies may be
+        slow — the more concrete detail you give, the faster I can act on it.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `wgh ...`
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `wgh` release/tag and your macOS version.
+      placeholder: "wgh v0.6.0, macOS 15.6 (arm64)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Poller log
+      description: >
+        Relevant lines from
+        `~/Library/Application Support/watchgh/poller.log`, if any.
+      render: text
+    validations:
+      required: false
