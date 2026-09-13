@@ -18,6 +18,18 @@ in your own direction.
   reviewed and merged far faster than a sprawling one.
 - **Explain the why.** What problem does this solve, and how did you verify it?
 
+## Signed commits
+
+`main` requires signed commits, so your PR's commits must be signed or it can't
+be merged. If you haven't set this up, GitHub has a short guide, and the gist is:
+
+```sh
+git config --global commit.gpgsign true   # sign every commit
+# then add a GPG or SSH signing key to your account
+```
+
+An unsigned commit shows "Unverified" on GitHub; a signed one shows "Verified".
+
 ## The checks
 
 CI runs the same gauntlet I run by hand, and it must pass. Run it locally
