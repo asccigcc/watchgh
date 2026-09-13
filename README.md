@@ -1,28 +1,31 @@
 # watchgh
 
-A GitHub activity timeline for your terminal: the PRs, reviews, and CI runs that
-need you, in the order they arrive. `wgh` shows the timeline in your terminal
-and installs a launchd background poller that keeps GitHub in sync and posts
-coalesced desktop notifications — running counts of what awaits you — even when
-no window is open. Auth piggybacks on your credentials (`GITHUB_TOKEN` if set,
-otherwise `gh auth token`).
+A GitHub activity timeline for your terminal. It shows the pull requests,
+reviews, and CI runs that need you, in the order they arrive.
+
+Run `wgh` to open the timeline. It also starts a background poller that keeps
+GitHub in sync and sends desktop notifications when something needs you, even
+when no window is open. It signs in with your existing GitHub credentials
+(`GITHUB_TOKEN` if set, otherwise `gh auth token`).
 
 > **Status:** a personal pet project, maintained solo and as time allows. Shared
-> in case it's useful. Issues and pull requests are welcome — I review them when
-> I can, so replies may be slow, and small, focused changes get merged fastest.
-> See [CONTRIBUTING.md](CONTRIBUTING.md). Fork it freely under MIT.
+> in case it's useful. Issues and pull requests are welcome; I review them when I
+> can, so replies may be slow, and small, focused changes get merged fastest. See
+> [CONTRIBUTING.md](CONTRIBUTING.md). Fork it freely under MIT.
+
+![The watchgh timeline in a terminal, showing the Inbox tab with review requests](docs/screenshot.png)
 
 ## Install
 
 macOS only. The installer downloads the prebuilt `wgh` binary from the latest
-GitHub release and drops it on your PATH. No Go toolchain required.
+GitHub release and puts it on your PATH. No Go toolchain needed.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
 ```
 
-It installs to `/usr/local/bin/wgh` by default; set `BINDIR` to override, or
-`WGH_TAG` to pin a release:
+It installs to `/usr/local/bin/wgh`. Set `BINDIR` to change that, or `WGH_TAG`
+to pin a specific release:
 
 ```sh
 BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
@@ -30,7 +33,7 @@ BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
 
 ## Update
 
-`wgh` is a single binary, so updating is just re-running the installer — it
+`wgh` is a single binary, so updating just means re-running the installer. It
 always fetches the latest release:
 
 ```sh
@@ -38,45 +41,47 @@ curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | 
 ```
 
 (While the repo is private, run `bash install.sh` from a checkout with the
-GitHub CLI authenticated, or pin a specific build with `WGH_TAG=v0.5.0`.)
+GitHub CLI signed in, or pin a build with `WGH_TAG=v0.5.0`.)
 
 Then **restart the background poller** so it runs the new binary:
 
 ```sh
-wgh stop   # unload the running poller
+wgh stop   # stop the running poller
 wgh        # reinstall and start it on the updated binary
 ```
 
-This step matters. The poller is a long-running launchd process, so replacing
-the file on disk doesn't touch the copy already in memory — the old poller keeps
-running (and writing to the store) until it's restarted. `wgh stop && wgh` swaps
-it for the updated binary in one step.
+This step matters. The poller runs continuously, so replacing the file on disk
+doesn't change the copy already running in memory. The old one keeps going until
+you restart it. `wgh stop && wgh` swaps in the updated binary in one step.
 
 ## Commands
 
 ```sh
 wgh          # interactive timeline (prints plain text when piped)
-wgh open 42  # open item 42 in the browser, mark read (here + GitHub)
+wgh open 42  # open item 42 in the browser, mark it read (here and on GitHub)
 wgh read 42  # mark item 42 read without opening
 wgh stop     # stop the background poller (restarts next time you open wgh)
 ```
 
 ## Interactive timeline
 
-Bare `wgh` in a terminal opens a full-screen timeline; piped or redirected, it
-prints plain text so scripts keep working. It re-reads the local store every
-couple of seconds so events the background poller writes appear live, and
-refreshes on launch and on `R`. A `⟳ syncing` marker in the title bar shows a
-sync in flight; the footer shows whether the background poller is on. (If the
-poller isn't running, the open window polls GitHub itself.) Four tabs, with live
-counts:
+Run `wgh` in a terminal to open a full-screen timeline. When piped or
+redirected, it prints plain text so scripts keep working.
+
+The window stays live. It re-reads its local data every couple of seconds, so
+anything the background poller picks up shows up on its own, and it refreshes on
+launch and when you press `R`. A `⟳ syncing` marker in the title bar means a
+sync is in flight, and the footer shows whether the background poller is
+running. (If it isn't, the open window checks GitHub itself.)
+
+Four tabs, each with a live count:
 
 | Tab | Shows |
 | --- | --- |
-| 1 Inbox | unread items others put on you: review requests, assignments |
-| 2 My PRs | every open PR you own, with its latest activity or CI/merge state |
+| 1 Inbox | unread items others put on you: review requests and assignments |
+| 2 My PRs | every open PR you own, with its latest activity or CI and merge state |
 | 3 Read | items you've already handled |
-| 4 CI | build pass/fail and blocked/clean on your tracked PRs |
+| 4 CI | build pass or fail, and blocked or clean, on your tracked PRs |
 
 | Key | Action |
 | --- | --- |
@@ -84,52 +89,52 @@ counts:
 | ↑/↓, k/j | move the selection |
 | g / G | jump to newest / oldest |
 | PgUp/PgDn | page by a screenful |
-| ⏎ | open the selected item in the browser + mark read |
+| ⏎ | open the selected item in the browser and mark it read |
 | r | mark read without opening |
-| R | poll GitHub now |
+| R | check GitHub now |
 | q / Esc / Ctrl-C | quit |
 
 ## Background poller
 
-The first time you open `wgh` it installs a launchd agent
-(`com.watchgh.poller`) that runs `wgh` headless in the background. launchd keeps
-it alive across logins and reboots, so it polls GitHub on the poll-floor cadence
-and posts desktop notifications even when no window is open. Notifications are
-**coalesced per category** into running counts of what awaits you — "3 reviews
-requested", "2 PRs assigned to you", "2 PRs failing CI", "1 PR blocked", "2 PRs
-need your reply" — rather than one banner per event. A category re-alerts only
-when its count grows; open wgh to see the items, and the count clears as you
-handle them. Its first pass is silent so a cold start doesn't alert on the whole
-backlog. CI and blocked counts come from a GraphQL poll of your open PRs.
+The first time you open `wgh`, it installs a small background service (a launchd
+agent named `com.watchgh.poller`) that runs `wgh` on its own. macOS keeps it
+alive across logins and reboots, so it checks GitHub every few minutes and sends
+desktop notifications even when no window is open.
+
+Notifications are grouped by type into a running count of what needs you: "3
+reviews requested", "2 PRs assigned to you", "2 PRs failing CI", "1 PR blocked",
+"2 PRs need your reply". You get one notification per type instead of one per
+event, and it only re-alerts when the count goes up. Open `wgh` to see the
+items, and the count clears as you handle them. The first check after starting
+is silent, so a cold start doesn't alert you about your whole backlog.
 
 ```sh
-wgh stop   # unload the poller and remove its agent
-wgh        # opening wgh again re-installs and starts it
+wgh stop   # stop the poller and remove its service
+wgh        # opening wgh again reinstalls and starts it
 ```
 
-Notification delivery uses `terminal-notifier` if installed, which lets each
-category's counter update its banner in place (`brew install terminal-notifier`);
-without it, wgh falls back to a single summary banner via the built-in
-`osascript`. Because the poller runs under
-launchd — which starts with a minimal environment — it resolves your token via
-`gh auth token`; make sure the GitHub CLI is authenticated (`gh auth login`).
-Its output goes to `~/Library/Application Support/watchgh/poller.log`.
+For notifications, install `terminal-notifier` (`brew install
+terminal-notifier`) and each count updates its banner in place. Without it,
+`wgh` shows a single summary banner instead. The poller runs with a minimal
+environment, so it reads your token from `gh auth token`; make sure the GitHub
+CLI is signed in (`gh auth login`). Its log is at
+`~/Library/Application Support/watchgh/poller.log`.
 
 ## Configuration
 
-Optional `config.toml` next to the store
-(`~/Library/Application Support/watchgh/config.toml`). Flat `key = value`; every
-key is optional, and a malformed file falls back to defaults. See
+An optional `config.toml` sits next to the data file
+(`~/Library/Application Support/watchgh/config.toml`). It's flat `key = value`,
+every key is optional, and a malformed file falls back to the defaults. See
 [`config.example.toml`](config.example.toml) for the full list.
 
-The poll floor sets the background poll cadence; it defaults to `5m` (minimum
-`60s`). Desktop notifications pull you in and `R` forces an on-demand refresh, so
-tighter polling rarely pays for the extra API traffic. State lives in a SQLite DB
-under
-`~/Library/Application Support/watchgh/watchgh.db`; read items are pruned after 30
-days (configurable via `retention`), unread items never. PRs that merge or close
-are dropped from every tab on the next poll, so a dead PR never lingers in Read
-waiting out the retention window.
+The poll interval controls how often the background poller checks GitHub. It
+defaults to `5m` (minimum `60s`). Desktop notifications pull you in and `R`
+refreshes on demand, so polling more often rarely pays for the extra traffic.
+
+Data lives in a SQLite file at
+`~/Library/Application Support/watchgh/watchgh.db`. Read items are removed after
+30 days (set with `retention`); unread items are kept. PRs that merge or close
+drop out of every tab on the next check, so a finished PR never lingers in Read.
 
 ## License
 
