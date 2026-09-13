@@ -23,6 +23,30 @@ It installs to `/usr/local/bin/wgh` by default; set `BINDIR` to override, or
 BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
 ```
 
+## Update
+
+`wgh` is a single binary, so updating is just re-running the installer — it
+always fetches the latest release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
+```
+
+(While the repo is private, run `bash install.sh` from a checkout with the
+GitHub CLI authenticated, or pin a specific build with `WGH_TAG=v0.5.0`.)
+
+Then **restart the background poller** so it runs the new binary:
+
+```sh
+wgh stop   # unload the running poller
+wgh        # reinstall and start it on the updated binary
+```
+
+This step matters. The poller is a long-running launchd process, so replacing
+the file on disk doesn't touch the copy already in memory — the old poller keeps
+running (and writing to the store) until it's restarted. `wgh stop && wgh` swaps
+it for the updated binary in one step.
+
 ## Commands
 
 ```sh
