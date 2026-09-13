@@ -1,0 +1,36 @@
+# watchgh is a solo pet project that doesn't take pull requests. This politely
+# closes any PR opened by anyone other than the repo owner, so contributors get
+# an immediate, friendly answer instead of a PR that silently rots. It uses
+# pull_request_target (never checks out the PR's code) so a fork PR can't run
+# untrusted code with the token.
+name: Close pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  close:
+    if: github.event.pull_request.user.login != github.repository_owner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              "Hey, thanks for taking the time — genuinely. 👋",
+              "",
+              "**watchgh is a personal pet project I maintain solo, so I'm not taking pull requests.** This PR is being closed automatically; it's not a judgment of your work, just the project's policy.",
+              "",
+              "It's MIT-licensed, so please **fork it and make it your own** — that's the intended way to build on it.",
+              "",
+              "Thanks again for the interest. 🙏",
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const number = context.payload.pull_request.number;
+            await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
+            await github.rest.pulls.update({ owner, repo, pull_number: number, state: "closed" });
