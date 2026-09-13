@@ -51,6 +51,14 @@ const (
 // background poll wrote. Cheap: a single indexed query against a local SQLite file.
 const refreshTick = 2 * time.Second
 
+// statusLinger is how long a transient footer confirmation ("opened …") stays up
+// before the bar reverts to the keybinding menu.
+const statusLinger = 10 * time.Second
+
+// menuHint is the idle footer — the keybinding legend shown whenever no transient
+// status is up.
+const menuHint = "1-4/⇥ tabs · ↑↓ move · ⏎ open · r read · R sync · q quit"
+
 func runTUI(ctx context.Context) error {
 	st, err := openStore()
 	if err != nil {
@@ -85,6 +93,7 @@ type model struct {
 
 	all    []timeline.Event // every stored event, newest first (unfiltered)
 	prs    []timeline.Event // Mine tab: one synthesized row per open PR
+	ci     []timeline.Event // CI tab: one row per tracked PR, its latest CI/merge event
 	counts []int            // per-tab row count for the tab-bar badges (recomputed on load)
 }
 
@@ -103,11 +112,17 @@ type tui struct {
 	status   string           // footer message (last action + warnings)
 	syncing  bool             // a background sync is in flight (shown in the title bar)
 	daemonUp bool             // the launchd poller is running (it owns notifications)
+
+	statusTimer *time.Timer // reverts a transient status to menuHint after statusLinger
 }
 
 // mineTab is the index of "My PRs" in tabDefs; it is sourced from the open-PR
 // roster (one row per open PR) rather than from a filter over stored events.
 const mineTab = 1
+
+// ciTab is the index of the "CI" tab; like Mine it is collapsed to one row per
+// PR (the latest CI/merge event) rather than a running history of transitions.
+const ciTab = 3
 
 // tabDefs are the timeline lenses, switched with 1-4 / Tab, ordered by priority:
 // what others need from you, your own PRs, then history and CI detail.
@@ -143,10 +158,14 @@ func (t *tui) run() error {
 
 	t.pos = make([]int, len(tabDefs))
 	t.counts = make([]int, len(tabDefs))
+	// A stopped timer, ready to Reset when a transient status is shown. Created
+	// before the first reload so setStatus is safe to call from anywhere below.
+	t.statusTimer = time.NewTimer(time.Hour)
+	t.statusTimer.Stop()
 	t.resize()
 	t.reload()
 	if t.status == "" { // keep any launch warning (e.g. poller install failed)
-		t.status = "1-4/⇥ tabs · ↑↓ move · ⏎ open · r read · R sync · q quit"
+		t.status = menuHint
 	}
 	t.syncing = true // the launch sync (kicked off below) is already in flight
 	t.draw()
@@ -200,6 +219,9 @@ func (t *tui) run() error {
 			}
 		case res := <-syncDone:
 			t.applySync(res)
+			t.draw()
+		case <-t.statusTimer.C:
+			t.status = menuHint // a transient confirmation has lingered long enough
 			t.draw()
 		case k, ok := <-keys:
 			if !ok {
@@ -271,11 +293,16 @@ func (t *tui) cycleTab() { t.switchTab((t.active + 1) % len(tabDefs)) }
 func (m *model) count(i int) int { return m.counts[i] }
 
 // recount refreshes the per-tab badge counts without allocating a filtered slice
-// per tab: Mine is the roster length, the rest count matches over stored events.
+// per tab: Mine and CI are their collapsed roster lengths, the rest count matches
+// over stored events.
 func (m *model) recount() {
 	for i, d := range tabDefs {
-		if i == mineTab {
+		switch i {
+		case mineTab:
 			m.counts[i] = len(m.prs)
+			continue
+		case ciTab:
+			m.counts[i] = len(m.ci)
 			continue
 		}
 		n := 0
@@ -305,13 +332,28 @@ func (t *tui) act(open bool) {
 	}
 	e := t.events[t.sel]
 	if err := applyMark(t.ctx, t.st, e, open); err != nil {
-		t.status = "⚠ " + err.Error()
+		t.setStatus("⚠ " + err.Error())
 	} else if open {
-		t.status = "opened " + timeline.ShortRef(e.Repo, e.Number)
+		t.setStatus("opened " + timeline.ShortRef(e.Repo, e.Number))
 	} else {
-		t.status = "marked read " + timeline.ShortRef(e.Repo, e.Number)
+		t.setStatus("marked read " + timeline.ShortRef(e.Repo, e.Number))
 	}
 	t.reload()
+}
+
+// setStatus shows a transient footer message and schedules a revert to menuHint
+// after statusLinger, so an action's confirmation doesn't sit in the bar forever.
+// The drain guards a Reset against a fire already queued on the channel; safe
+// because setStatus only runs on the main loop, never concurrently with its read.
+func (t *tui) setStatus(msg string) {
+	t.status = msg
+	if !t.statusTimer.Stop() {
+		select {
+		case <-t.statusTimer.C:
+		default:
+		}
+	}
+	t.statusTimer.Reset(statusLinger)
 }
 
 // syncResult carries a background sync back to the main loop, which owns every
@@ -431,15 +473,19 @@ func (m *model) load() (bool, error) {
 	before := signature(m.all)
 	m.all = stored
 	m.prs = m.roster()
+	m.ci = m.ciRoster()
 	m.recount()
 	return before != signature(m.all), nil
 }
 
-// tabRows returns the row set backing tab i: the open-PR roster for Mine, else
-// the tab's filter applied over all stored events.
+// tabRows returns the row set backing tab i: the open-PR roster for Mine, the
+// collapsed latest-per-PR set for CI, else the tab's filter over all stored events.
 func (m *model) tabRows(i int) []timeline.Event {
-	if i == mineTab {
+	switch i {
+	case mineTab:
 		return m.prs
+	case ciTab:
+		return m.ci
 	}
 	show := tabDefs[i].show
 	out := make([]timeline.Event, 0, len(m.all))
@@ -473,6 +519,28 @@ func (m *model) roster() []timeline.Event {
 		} else {
 			out = append(out, synthPR(pr))
 		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].TS.After(out[j].TS) })
+	return out
+}
+
+// ciRoster collapses the CI tab to one row per tracked PR: the latest CI/merge
+// (graphql) event for each repo#num. The tab reflects each PR's current build and
+// merge status, not a running history, so earlier transitions fold away.
+func (m *model) ciRoster() []timeline.Event {
+	latest := make(map[string]timeline.Event)
+	for _, e := range m.all {
+		if !isCI(e) {
+			continue
+		}
+		k := fmt.Sprintf("%s#%d", e.Repo, e.Number)
+		if cur, ok := latest[k]; !ok || e.TS.After(cur.TS) {
+			latest[k] = e
+		}
+	}
+	out := make([]timeline.Event, 0, len(latest))
+	for _, e := range latest {
+		out = append(out, e)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].TS.After(out[j].TS) })
 	return out

@@ -195,10 +195,12 @@ func TestRecountMatchesFiltersAndRoster(t *testing.T) {
 			{Unread: true, IsMine: true, Source: "graphql"},        // CI
 		},
 		prs: []timeline.Event{{}, {}, {}}, // three roster rows
+		ci:  []timeline.Event{{}},         // one collapsed CI row (latest-per-PR)
 	}
 	m.recount()
 
-	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3).
+	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3). Mine and CI count their
+	// collapsed rosters, not the raw event matches.
 	want := []int{2, 3, 1, 1}
 	for i, w := range want {
 		if m.counts[i] != w {
@@ -221,6 +223,21 @@ func TestApplySyncPartialPaintsViewerButKeepsSyncing(t *testing.T) {
 	}
 }
 
+func TestSetStatusArmsRevertTimer(t *testing.T) {
+	// setStatus shows the message and arms the revert timer so the bar returns to
+	// the keybinding menu after statusLinger rather than sticking forever.
+	tui := &tui{statusTimer: time.NewTimer(time.Hour)}
+	tui.statusTimer.Stop()
+
+	tui.setStatus("opened api#1")
+	if tui.status != "opened api#1" {
+		t.Errorf("status = %q, want the transient message", tui.status)
+	}
+	if !tui.statusTimer.Stop() {
+		t.Error("setStatus should arm the revert timer")
+	}
+}
+
 func TestSynthPR(t *testing.T) {
 	// The badge now carries merge/attention state; CI health rides CIState (the
 	// glyph column), so the two dimensions are independent on a synth row.
@@ -235,6 +252,29 @@ func TestSynthPR(t *testing.T) {
 	}
 	if e := synthPR(store.OpenPR{Title: "wip"}); e.Kind != timeline.KindOpenPR || e.Detail != "wip" {
 		t.Errorf("quiet PR: got kind %v detail %q, want KindOpenPR + title", e.Kind, e.Detail)
+	}
+}
+
+func TestCIRosterCollapsesToLatestPerPR(t *testing.T) {
+	now := time.Now()
+	m := &model{
+		all: []timeline.Event{
+			// Two transitions on the same PR — only the latest should survive.
+			{Repo: "o/r", Number: 12140, Source: "graphql", TS: now.Add(-time.Hour), Detail: "CI failed"},
+			{Repo: "o/r", Number: 12140, Source: "graphql", TS: now, Detail: "passed"},
+			// A different PR keeps its own row.
+			{Repo: "o/r", Number: 12141, Source: "graphql", TS: now.Add(-time.Minute), Detail: "blocked"},
+			// A notification event is not CI and must not appear here.
+			{Repo: "o/r", Number: 12142, Source: "notification", TS: now},
+		},
+	}
+	ci := m.ciRoster()
+	if len(ci) != 2 {
+		t.Fatalf("ciRoster len = %d, want 2 (one row per PR)", len(ci))
+	}
+	// Newest first, and #12140 shows its latest result, not the stale one.
+	if ci[0].Number != 12140 || ci[0].Detail != "passed" {
+		t.Errorf("newest row = #%d %q, want #12140 \"passed\"", ci[0].Number, ci[0].Detail)
 	}
 }
 
