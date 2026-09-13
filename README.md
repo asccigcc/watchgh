@@ -31,6 +31,16 @@ to pin a specific release:
 BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
 ```
 
+Then run it:
+
+```sh
+wgh
+```
+
+That opens the timeline and, on this first run, installs the background poller.
+Make sure the GitHub CLI is signed in first (`gh auth login`), since `wgh` uses
+its token.
+
 ## Update
 
 `wgh` is a single binary, so updating just means re-running the installer. It
