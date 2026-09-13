@@ -3,7 +3,7 @@
 BINDIR ?= $(HOME)/go/bin
 DIST   ?= dist
 
-.PHONY: build install test release
+.PHONY: build install test release ci
 
 # Build the pure-Go binary in the working directory.
 build:
@@ -25,3 +25,14 @@ install:
 
 test:
 	go test ./...
+
+# The full pre-commit / CI gauntlet. Run this locally before pushing; CI runs
+# the exact same target, so a green `make ci` here means a green CI. macOS only
+# (the CLI is macOS-only), so there's no cross-platform runner to reproduce —
+# this is the local equivalent of the GitHub Actions run.
+ci:
+	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+	CGO_ENABLED=0 go build ./cmd/wgh/... ./internal/...
+	go vet ./...
+	go test ./...
+	go test -race ./...

@@ -20,17 +20,18 @@ in your own direction.
 
 ## The checks
 
-CI runs the same gauntlet I run by hand, and it must pass:
+CI runs the same gauntlet I run by hand, and it must pass. Run it locally
+before pushing with:
 
 ```sh
-gofmt -l .                                    # must print nothing
-CGO_ENABLED=0 go build ./cmd/wgh/... ./internal/...
-go vet ./...
-go test ./...
-go test -race ./...
+make ci
 ```
 
-Run it locally before pushing — a red CI is the most common reason a PR stalls.
+That's exactly what CI runs (gofmt, cgo-free build, vet, test, and a race
+pass), so a green `make ci` means a green CI — the most common reason a PR
+stalls is skipping it. watchgh is macOS-only, so `make ci` on a Mac is the
+local equivalent of the CI run; there's no Linux/`act` shortcut, because the
+code won't build off Darwin.
 
 ## Style
 
