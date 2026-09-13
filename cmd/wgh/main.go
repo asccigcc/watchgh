@@ -205,10 +205,11 @@ func syncTracked(ctx context.Context, c *github.Client, st *store.Store, viewer 
 }
 
 // syncReviews reconciles review-request items against whether the viewer has
-// actually reviewed each PR's current head: it auto-resolves requests already
-// reviewed and re-surfaces ones whose review went stale after new commits. It
-// emits no new events, so — unlike the notification and tracked-PR syncs — it
-// returns nothing but an error.
+// actually reviewed each PR's current head: it relabels a handled request with
+// the viewer's verdict (approved / changes requested / commented) and marks it
+// read, and re-surfaces one whose review went stale after new commits. It emits
+// no new events, so — unlike the notification and tracked-PR syncs — it returns
+// nothing but an error.
 func syncReviews(ctx context.Context, c *github.Client, st *store.Store) error {
 	states, err := c.ReviewStates(ctx)
 	if err != nil {
@@ -216,7 +217,7 @@ func syncReviews(ctx context.Context, c *github.Client, st *store.Store) error {
 	}
 	verdicts := make([]store.ReviewState, len(states))
 	for i, rs := range states {
-		verdicts[i] = store.ReviewState{Repo: rs.Repo, Number: rs.Number, AtHead: rs.AtHead}
+		verdicts[i] = store.ReviewState{Repo: rs.Repo, Number: rs.Number, AtHead: rs.AtHead, State: rs.State}
 	}
 	return st.ReconcileReviewRequests(ctx, verdicts)
 }

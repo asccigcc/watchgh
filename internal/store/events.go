@@ -324,24 +324,57 @@ type ReviewState struct {
 	Repo   string
 	Number int
 	AtHead bool
+	State  string // viewer's latest review verdict: APPROVED, CHANGES_REQUESTED, COMMENTED, …
 }
 
-// ReconcileReviewRequests drives the read-state of review-request items from
-// whether the viewer has actually reviewed each PR's current head. A request
-// whose review is up to date is auto-resolved (marked read, so it drops from the
-// Inbox); one whose review has gone stale — new commits pushed on top of it — is
-// re-surfaced (marked unread again). Only KindReviewRequested rows are touched;
-// PRs the viewer hasn't reviewed produce no verdict and are left as they are.
+// reviewVerdict maps the viewer's latest review state to the row's kind and
+// detail, so a handled review request shows what you actually did rather than
+// staying frozen at "review requested". Anything GitHub reports as a review but
+// isn't an explicit approve/changes-request (COMMENTED, DISMISSED) reads as a
+// plain comment.
+func reviewVerdict(state string) (timeline.Kind, string) {
+	switch state {
+	case "APPROVED":
+		return timeline.KindApproved, "approved"
+	case "CHANGES_REQUESTED":
+		return timeline.KindChangesRequested, "changes requested"
+	default:
+		return timeline.KindCommented, "commented"
+	}
+}
+
+// reviewKinds is the SQL IN-list of notification kinds ReconcileReviewRequests
+// owns: an open review request and the approve/changes verdicts it relabels a
+// handled request into. Scoping the match to these leaves genuine comment,
+// assignment, and mention notifications on the same PR untouched, while still
+// letting a later poll re-find a row it already relabeled so it can re-surface
+// it when new commits push past the review. A "commented" verdict is terminal —
+// it is not re-found — which is fine: a genuine re-request arrives as a fresh
+// notification that re-opens the row through the normal ingest path.
+var reviewKinds = fmt.Sprintf("%d,%d,%d",
+	int(timeline.KindReviewRequested), int(timeline.KindChangesRequested), int(timeline.KindApproved))
+
+// ReconcileReviewRequests reflects the viewer's actual verdict onto each review
+// request. When the viewer's latest review covers the PR's current head, the row
+// is relabeled to what they did — approved / changes requested / commented — and
+// treated as handled (marked read, so it drops from the Inbox to the Read tab).
+// When new commits have landed on top of that review, the row reverts to an open
+// "review requested" and re-surfaces as unread. PRs the viewer hasn't reviewed
+// produce no verdict and are left as they are.
 func (s *Store) ReconcileReviewRequests(ctx context.Context, states []ReviewState) error {
+	now := time.Now().Unix()
 	for _, rs := range states {
 		var err error
 		if rs.AtHead {
+			kind, detail := reviewVerdict(rs.State)
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE events SET read_at=? WHERE kind=? AND repo=? AND number=? AND read_at IS NULL`,
-				time.Now().Unix(), int(timeline.KindReviewRequested), rs.Repo, rs.Number)
+				`UPDATE events SET kind=?, detail=?, read_at=COALESCE(read_at, ?)
+				 WHERE source='notification' AND repo=? AND number=? AND kind IN (`+reviewKinds+`)`,
+				int(kind), detail, now, rs.Repo, rs.Number)
 		} else {
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE events SET read_at=NULL, github_unread=1 WHERE kind=? AND repo=? AND number=?`,
+				`UPDATE events SET kind=?, detail='review requested', read_at=NULL, github_unread=1
+				 WHERE source='notification' AND repo=? AND number=? AND kind IN (`+reviewKinds+`)`,
 				int(timeline.KindReviewRequested), rs.Repo, rs.Number)
 		}
 		if err != nil {

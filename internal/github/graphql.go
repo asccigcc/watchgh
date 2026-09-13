@@ -134,7 +134,8 @@ func (n prNode) toTrackedPR() TrackedPR {
 type ReviewState struct {
 	Repo   string // owner/name
 	Number int
-	AtHead bool // the viewer's latest review is against the current head commit
+	AtHead bool   // the viewer's latest review is against the current head commit
+	State  string // the viewer's latest review verdict: APPROVED, CHANGES_REQUESTED, COMMENTED, …
 }
 
 const reviewedQuery = `
@@ -148,7 +149,7 @@ fragment reviewed on PullRequest {
   number
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { oid } } }
-  viewerLatestReview { commit { oid } }
+  viewerLatestReview { state commit { oid } }
 }`
 
 // ReviewStates fetches the viewer's open PRs they've reviewed and reports, for
@@ -184,6 +185,7 @@ type reviewNode struct {
 		} `json:"nodes"`
 	} `json:"commits"`
 	ViewerLatestReview *struct {
+		State  string `json:"state"`
 		Commit struct {
 			Oid string `json:"oid"`
 		} `json:"commit"`
@@ -204,6 +206,7 @@ func (n reviewNode) toReviewState() (ReviewState, bool) {
 		Repo:   n.Repository.NameWithOwner,
 		Number: n.Number,
 		AtHead: n.ViewerLatestReview.Commit.Oid == head,
+		State:  n.ViewerLatestReview.State,
 	}, true
 }
 

@@ -56,9 +56,9 @@ func (k Kind) Badge() Badge {
 	case KindAssigned:
 		return Badge{"→", "assign", colBlue}
 	case KindCommented:
-		return Badge{"●", "review", colMagenta}
+		return Badge{"●", "cmnt", colMagenta}
 	case KindChangesRequested:
-		return Badge{"●", "review", colMagenta}
+		return Badge{"●", "chgs", colMagenta}
 	case KindApproved:
 		return Badge{"✓", "appr", colGreen}
 	case KindStateChange:

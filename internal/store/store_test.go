@@ -304,27 +304,60 @@ func TestBackfillDetailsRewritesOnlyMatchingTokens(t *testing.T) {
 	}
 }
 
-func TestReconcileReviewRequestsResolvesAndResurfaces(t *testing.T) {
+func TestReconcileReviewRequestsRelabelsAndResurfaces(t *testing.T) {
 	s := testStore(t)
 	// ev() builds a KindReviewRequested row on acme/api#1.
 	s.Upsert(bg, ev("a", "t1", true))
 
-	// Reviewed at head -> auto-resolve (drops from the Inbox).
-	if err := s.ReconcileReviewRequests(bg, []ReviewState{{Repo: "acme/api", Number: 1, AtHead: true}}); err != nil {
+	// Reviewed at head -> relabel to the verdict and auto-resolve (drops to Read).
+	if err := s.ReconcileReviewRequests(bg, []ReviewState{{Repo: "acme/api", Number: 1, AtHead: true, State: "APPROVED"}}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.List(bg)
 	if got[0].Unread {
 		t.Fatal("reviewed-at-head request should be marked read")
 	}
+	if got[0].Kind != timeline.KindApproved || got[0].Detail != "approved" {
+		t.Fatalf("verdict not reflected: kind=%v detail=%q", got[0].Kind, got[0].Detail)
+	}
 
-	// New commits since the review -> re-surface as unread.
+	// New commits since the review -> revert to an open request and re-surface.
 	if err := s.ReconcileReviewRequests(bg, []ReviewState{{Repo: "acme/api", Number: 1, AtHead: false}}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = s.List(bg)
 	if !got[0].Unread {
 		t.Fatal("stale review should re-surface the request as unread")
+	}
+	if got[0].Kind != timeline.KindReviewRequested || got[0].Detail != "review requested" {
+		t.Fatalf("re-surfaced row should read as an open review request, got kind=%v detail=%q", got[0].Kind, got[0].Detail)
+	}
+}
+
+func TestReconcileReviewRequestsReflectsEachVerdict(t *testing.T) {
+	cases := []struct {
+		state      string
+		wantKind   timeline.Kind
+		wantDetail string
+	}{
+		{"APPROVED", timeline.KindApproved, "approved"},
+		{"CHANGES_REQUESTED", timeline.KindChangesRequested, "changes requested"},
+		{"COMMENTED", timeline.KindCommented, "commented"},
+		{"DISMISSED", timeline.KindCommented, "commented"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			s := testStore(t)
+			s.Upsert(bg, ev("a", "t1", true))
+			if err := s.ReconcileReviewRequests(bg, []ReviewState{{Repo: "acme/api", Number: 1, AtHead: true, State: tc.state}}); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := s.List(bg)
+			if got[0].Kind != tc.wantKind || got[0].Detail != tc.wantDetail {
+				t.Fatalf("%s -> kind=%v detail=%q, want kind=%v detail=%q",
+					tc.state, got[0].Kind, got[0].Detail, tc.wantKind, tc.wantDetail)
+			}
+		})
 	}
 }
 
