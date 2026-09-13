@@ -35,7 +35,7 @@ const MinPollFloor = 60 * time.Second
 func Defaults() Config {
 	return Config{
 		StaleAfter: 24 * time.Hour,
-		Retention:  7 * 24 * time.Hour,
+		Retention:  30 * 24 * time.Hour,
 		PollFloor:  5 * time.Minute,
 	}
 }

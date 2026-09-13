@@ -97,8 +97,8 @@ The poll floor sets the background poll cadence; it defaults to `5m` (minimum
 `60s`). Desktop notifications pull you in and `R` forces an on-demand refresh, so
 tighter polling rarely pays for the extra API traffic. State lives in a SQLite DB
 under
-`~/Library/Application Support/watchgh/watchgh.db`; read items are pruned after 7
-days, unread items never.
+`~/Library/Application Support/watchgh/watchgh.db`; read items are pruned after 30
+days (configurable via `retention`), unread items never.
 
 ## License
 

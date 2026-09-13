@@ -67,3 +67,18 @@ func TestFromNotificationMinePII(t *testing.T) {
 		t.Errorf("expected empty author for own PR, got %q", e.Author)
 	}
 }
+
+func TestFromNotificationIDIsStableThreadID(t *testing.T) {
+	// The event id must be the bare thread id (not thread + "@" + updated_at), so
+	// each thread owns exactly one row and later polls upsert onto it rather than
+	// minting a duplicate per update.
+	var n github.Notification
+	n.ID = "42"
+	n.Reason = "review_requested"
+	n.UpdatedAt = time.Now()
+
+	e := FromNotification(n, github.Subject{}, "me")
+	if e.ID != "42" || e.ThreadID != "42" {
+		t.Errorf("id/thread = %q/%q, want both %q", e.ID, e.ThreadID, "42")
+	}
+}

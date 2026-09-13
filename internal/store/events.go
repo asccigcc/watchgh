@@ -10,14 +10,18 @@ import (
 )
 
 // upsertEventSQL inserts a new event or refreshes the mutable fields of an
-// existing one (matched by id), preserving seq, first_seen, and any local
-// read_at.
+// existing one (matched by id), preserving seq and first_seen. A local read is
+// preserved across refreshes that carry no new activity; genuinely new activity
+// (a later ts than the stored row) clears read_at so the item re-surfaces as
+// unread — the notification event id is now the stable thread id, so this is how
+// a re-read thread comes back, in place, without minting a duplicate row.
 const upsertEventSQL = `
 INSERT INTO events
   (id, thread_id, source, ts, kind, repo, number, author, detail, url,
    github_unread, actionable, is_mine, first_seen, last_seen)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
+  read_at=CASE WHEN excluded.ts > events.ts THEN NULL ELSE events.read_at END,
   ts=excluded.ts, detail=excluded.detail, github_unread=excluded.github_unread,
   actionable=excluded.actionable, last_seen=excluded.last_seen`
 
@@ -199,6 +203,38 @@ func (s *Store) BackfillDetails(ctx context.Context, m map[string]string) error 
 	q.WriteString(" END WHERE detail IN (" + strings.Join(ph, ",") + ")")
 	_, err := s.db.ExecContext(ctx, q.String(), append(whenArgs, inArgs...)...)
 	return err
+}
+
+// CollapseNotificationThreads is a one-off migration that removes the duplicate
+// rows left by the old notification id scheme (thread id + "@" + updated_at),
+// which minted a fresh row on every thread update so a single PR piled up as
+// many unread rows across the tabs. It keeps, per thread, only the latest
+// version (max ts, then max seq) and rewrites its id to the bare thread id so
+// the stable-id upsert path merges future polls onto that one row. Idempotent:
+// once each survivor's id equals its thread id there is nothing left to collapse.
+func (s *Store) CollapseNotificationThreads(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Drop any notification row a same-thread sibling supersedes by (ts, seq);
+	// the survivor is the one with no strictly-greater sibling.
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM events
+WHERE source='notification'
+  AND EXISTS (
+    SELECT 1 FROM events sib
+    WHERE sib.source='notification' AND sib.thread_id=events.thread_id
+      AND (sib.ts > events.ts OR (sib.ts = events.ts AND sib.seq > events.seq))
+  )`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE events SET id=thread_id WHERE source='notification' AND id<>thread_id`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ReviewState is a per-PR verdict for reconciling review-request items: whether

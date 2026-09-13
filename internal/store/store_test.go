@@ -52,6 +52,81 @@ func TestUpsertDedupesAndAssignsStableSeq(t *testing.T) {
 	}
 }
 
+func TestUpsertResurfacesOnNewerActivity(t *testing.T) {
+	s := testStore(t)
+	old := ev("a", "t1", true)
+	old.TS = time.Now()
+	s.Upsert(bg, old)
+
+	seq := func() int64 { got, _ := s.List(bg); return got[0].Seq }()
+	if err := s.MarkRead(bg, seq); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.List(bg); got[0].Unread {
+		t.Fatal("expected read after MarkRead")
+	}
+
+	// Same id, no newer activity (ts unchanged): the local read must stick.
+	s.Upsert(bg, old)
+	if got, _ := s.List(bg); got[0].Unread {
+		t.Error("a refresh with no new activity should not re-surface a read item")
+	}
+
+	// Same id, later ts: genuine new activity re-surfaces it as unread, in place.
+	fresh := old
+	fresh.TS = old.TS.Add(time.Hour)
+	s.Upsert(bg, fresh)
+	again, _ := s.List(bg)
+	if len(again) != 1 {
+		t.Fatalf("re-surface must reuse the row, got %d rows", len(again))
+	}
+	if !again[0].Unread {
+		t.Error("new activity should clear read_at and re-surface as unread")
+	}
+}
+
+func TestCollapseNotificationThreads(t *testing.T) {
+	s := testStore(t)
+	base := time.Now()
+	// Three legacy per-update rows for one thread, plus a lone row for another.
+	for i, id := range []string{"t1@a", "t1@b", "t1@c"} {
+		e := ev(id, "t1", true)
+		e.TS = base.Add(time.Duration(i) * time.Hour)
+		e.Detail = id
+		s.Upsert(bg, e)
+	}
+	other := ev("t2@x", "t2", true)
+	s.Upsert(bg, other)
+
+	if err := s.CollapseNotificationThreads(bg); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ := s.List(bg)
+	if len(got) != 2 {
+		t.Fatalf("want one row per thread (2), got %d", len(got))
+	}
+	byThread := map[string]timeline.Event{}
+	for _, e := range got {
+		byThread[e.ThreadID] = e
+	}
+	// The t1 survivor is the latest version and its id is now the bare thread id.
+	if s := byThread["t1"]; s.ID != "t1" || s.Detail != "t1@c" {
+		t.Errorf("t1 survivor id=%q detail=%q, want id t1 and latest detail t1@c", s.ID, s.Detail)
+	}
+	if s := byThread["t2"]; s.ID != "t2" {
+		t.Errorf("t2 id=%q, want normalized to bare thread id t2", s.ID)
+	}
+
+	// Idempotent: a second run leaves the collapsed rows untouched.
+	if err := s.CollapseNotificationThreads(bg); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.List(bg); len(again) != 2 {
+		t.Fatalf("second run changed row count to %d, want 2", len(again))
+	}
+}
+
 func TestMarkReadClearsUnread(t *testing.T) {
 	s := testStore(t)
 	s.Upsert(bg, ev("a", "t1", true))

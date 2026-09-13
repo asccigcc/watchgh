@@ -13,6 +13,9 @@ import (
 // Backfill runs the one-off cleanup that rewrites events still holding a raw
 // GitHub reason token as their detail. Idempotent; safe to call at every start.
 func Backfill(ctx context.Context, st *store.Store) error {
+	if err := st.CollapseNotificationThreads(ctx); err != nil {
+		return err
+	}
 	return st.BackfillDetails(ctx, DetailBackfill())
 }
 
@@ -28,7 +31,11 @@ func FromNotification(n github.Notification, s github.Subject, viewer string) ti
 	}
 
 	return timeline.Event{
-		ID:         n.ID + "@" + n.UpdatedAt.UTC().Format("20060102T150405Z"),
+		// The id is the stable thread id: one row per PR thread. Re-surfacing a
+		// re-read thread on new activity is the store's job (upsert clears read_at
+		// when a later ts arrives), not something we encode into a per-update id —
+		// that only piled up duplicate rows.
+		ID:         n.ID,
 		ThreadID:   n.ID,
 		Source:     "notification",
 		TS:         n.UpdatedAt,

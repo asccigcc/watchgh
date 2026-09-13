@@ -11,7 +11,10 @@
 stale_after = "24h"
 
 # Read/resolved events older than this are pruned; unread items are never removed.
-retention = "7d"
+# The window is measured from when an item was last seen, so a handled thread
+# ages out ~this long after its final activity. It's an audit-trail knob, not a
+# disk-space one — one row per item stays tiny — so the default is generous.
+retention = "30d"
 
 # Spacing between the background poller's GitHub polls (also the open window's
 # self-poll when the poller isn't running). The default is relaxed (5m) since

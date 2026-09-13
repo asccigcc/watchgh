@@ -13,8 +13,8 @@ func TestDefaults(t *testing.T) {
 	if d.StaleAfter != 24*time.Hour {
 		t.Errorf("StaleAfter = %v, want 24h", d.StaleAfter)
 	}
-	if d.Retention != 7*24*time.Hour {
-		t.Errorf("Retention = %v, want 168h", d.Retention)
+	if d.Retention != 30*24*time.Hour {
+		t.Errorf("Retention = %v, want 720h", d.Retention)
 	}
 	if d.PollFloor != 5*time.Minute {
 		t.Errorf("PollFloor = %v, want 5m", d.PollFloor)
@@ -51,7 +51,7 @@ func TestParsePartialKeepsDefaults(t *testing.T) {
 		t.Errorf("PollFloor = %v, want 90s", c.PollFloor)
 	}
 	// Everything unset stays at the default.
-	if c.StaleAfter != 24*time.Hour || c.Retention != 7*24*time.Hour {
+	if c.StaleAfter != 24*time.Hour || c.Retention != 30*24*time.Hour {
 		t.Errorf("unset fields drifted from defaults: %+v", c)
 	}
 }
