@@ -78,6 +78,27 @@ func TestRelative(t *testing.T) {
 	}
 }
 
+func TestRelativeOrDate(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		ts   time.Time
+		want string
+	}{
+		{now.Add(-30 * time.Second), "now"},
+		{now.Add(-5 * time.Minute), "5m"},
+		{now.Add(-3 * time.Hour), "3h"},
+		{now.Add(-50 * time.Hour), "2d"},
+		{now.Add(-6 * 24 * time.Hour), "6d"},                          // still relative under a week
+		{now.Add(-8 * 24 * time.Hour), "Sep 12"},                      // older than a week -> date, same year
+		{time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC), "Dec 31 '25"}, // prior year -> year suffix
+	}
+	for _, c := range cases {
+		if got := relativeOrDate(now, c.ts); got != c.want {
+			t.Errorf("relativeOrDate(%s) = %q, want %q", c.ts.Format(time.RFC3339), got, c.want)
+		}
+	}
+}
+
 func TestGutterMark(t *testing.T) {
 	now := time.Now()
 	old := Event{Unread: true, Actionable: true, TS: now.Add(-48 * time.Hour)}

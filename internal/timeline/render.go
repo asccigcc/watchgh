@@ -77,8 +77,9 @@ func renderRow(e Event, o RenderOpts) string {
 	label, gcolor := gutterMark(e, o.Now, o.staleAfter())
 	gutter := colorize(padRight(label, 3), gcolor, o.Color)
 
-	// TIME (relative, right-aligned in 5).
-	age := padLeft(relative(o.Now.Sub(e.TS)), 5)
+	// TIME: how long it's been waiting — relative while recent, an absolute date
+	// once older than a week. Right-aligned in 6 to fit "Sep 12".
+	age := padLeft(relativeOrDate(o.Now, e.TS), 6)
 
 	// CI glyph (My-PRs tab only): current CI health as its own column so it reads
 	// independently of the merge-state badge — a passing-but-blocked PR shows a
@@ -161,6 +162,21 @@ func ciGlyph(state string) (string, color) {
 // Relative renders a compact human age ("now", "5m", "3h", "2d"), exported for
 // reuse outside the timeline renderer.
 func Relative(d time.Duration) string { return relative(d) }
+
+// relativeOrDate renders how long ago ts was: a compact relative age while it's
+// under a week ("now", "5m", "3h", "6d"), then an absolute date once "Nd" stops
+// being precise. The year is shown only when it isn't the current one, so
+// same-year dates stay short ("Sep 12") and older ones stay unambiguous
+// ("Dec 31 '25").
+func relativeOrDate(now, ts time.Time) string {
+	if d := now.Sub(ts); d < 7*24*time.Hour {
+		return relative(d)
+	}
+	if ts.Year() == now.Year() {
+		return ts.Format("Jan 2")
+	}
+	return ts.Format("Jan 2 '06")
+}
 
 func relative(d time.Duration) string {
 	switch {
