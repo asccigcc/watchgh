@@ -209,6 +209,32 @@ func TestRecountMatchesFiltersAndRoster(t *testing.T) {
 	}
 }
 
+func TestHeaderParenthesizesCountsAndHidesZero(t *testing.T) {
+	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3). A nonzero count renders as
+	// "(n)" so it can't be mistaken for the tab index; a zero count drops the
+	// badge so an empty tab reads as just its name.
+	m := &tui{cols: 200}
+	m.counts = []int{9, 0, 8, 0}
+	h := m.header()
+
+	if !strings.Contains(h, "1 Inbox (9)") {
+		t.Errorf("nonzero count should render as (9); got %q", h)
+	}
+	if !strings.Contains(h, "3 Read (8)") {
+		t.Errorf("nonzero count should render as (8); got %q", h)
+	}
+	if strings.Contains(h, "(0)") {
+		t.Errorf("zero count should be hidden, not shown as (0); got %q", h)
+	}
+	// The zero-count tabs show their bare name with no trailing count.
+	if !strings.Contains(h, "2 My PRs ") || strings.Contains(h, "2 My PRs (") {
+		t.Errorf("zero-count My PRs should show just its name; got %q", h)
+	}
+	if !strings.Contains(h, "4 CI ") || strings.Contains(h, "4 CI (") {
+		t.Errorf("zero-count CI should show just its name; got %q", h)
+	}
+}
+
 func TestApplySyncPartialPaintsViewerButKeepsSyncing(t *testing.T) {
 	// The early partial result should surface the resolved login right away
 	// while leaving the syncing marker up — it must not clear syncing or (since

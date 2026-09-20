@@ -669,7 +669,12 @@ func (t *tui) titleBar() string {
 func (t *tui) header() string {
 	var b strings.Builder
 	for i, d := range tabDefs {
-		seg := fmt.Sprintf(" %d %s %d ", i+1, d.name, t.count(i))
+		// Parenthesize the count so it can't be read as part of the tab index
+		// ("1 Inbox 9"), and drop it at zero so an empty tab is just its name.
+		seg := fmt.Sprintf(" %d %s ", i+1, d.name)
+		if n := t.count(i); n > 0 {
+			seg = fmt.Sprintf(" %d %s (%d) ", i+1, d.name, n)
+		}
 		if i == t.active {
 			b.WriteString(styTab + seg + reset)
 		} else {
