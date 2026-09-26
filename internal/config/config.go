@@ -19,7 +19,7 @@ import (
 // Config holds the thresholds that were previously hardcoded across the CLI and
 // renderer.
 type Config struct {
-	StaleAfter time.Duration // unread + actionable older than this earns the DUE marker
+	StaleAfter time.Duration // how long a fresh unread item stays marked NEW before the badge drops
 	Retention  time.Duration // prune read/resolved events older than this
 	PollFloor  time.Duration // spacing between background polls
 }

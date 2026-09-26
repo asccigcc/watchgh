@@ -120,15 +120,17 @@ func TestRenderRowTags(t *testing.T) {
 
 func TestGutterMark(t *testing.T) {
 	now := time.Now()
-	old := Event{Unread: true, Actionable: true, TS: now.Add(-48 * time.Hour)}
-	if got, _ := gutterMark(old, now, defaultStaleAfter); got != "DUE" {
-		t.Errorf("stale actionable gutter = %q, want DUE", got)
-	}
-	fresh := Event{Unread: true, Actionable: true, TS: now.Add(-1 * time.Hour)}
+	// A fresh unread item is NEW; once it ages past the window the badge drops even
+	// though it's still unread (it just settles into the list). Read items are blank.
+	fresh := Event{Unread: true, TS: now.Add(-1 * time.Hour)}
 	if got, _ := gutterMark(fresh, now, defaultStaleAfter); got != "NEW" {
 		t.Errorf("fresh unread gutter = %q, want NEW", got)
 	}
-	read := Event{Unread: false, TS: now.Add(-48 * time.Hour)}
+	aged := Event{Unread: true, TS: now.Add(-48 * time.Hour)}
+	if got, _ := gutterMark(aged, now, defaultStaleAfter); got != "" {
+		t.Errorf("aged unread gutter = %q, want empty (NEW expires after the window)", got)
+	}
+	read := Event{Unread: false, TS: now.Add(-1 * time.Hour)}
 	if got, _ := gutterMark(read, now, defaultStaleAfter); got != "" {
 		t.Errorf("read gutter = %q, want empty", got)
 	}

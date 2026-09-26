@@ -21,8 +21,9 @@ const (
 	colMagenta color = "\x1b[35m"
 )
 
-// defaultStaleAfter is how long an unread, actionable item may sit before it
-// earns the DUE marker, used when RenderOpts leaves StaleAfter unset.
+// defaultStaleAfter is how long a fresh unread item stays marked NEW before the
+// badge drops and it settles into the list, used when RenderOpts leaves
+// StaleAfter unset.
 const defaultStaleAfter = 24 * time.Hour
 
 // RenderOpts controls output for a given terminal/pipe.
@@ -32,7 +33,7 @@ type RenderOpts struct {
 	LeadWithPR bool          // lead with the PR number + bare repo name (TUI) instead of seq + repo#num (list, which opens by seq)
 	ShowCI     bool          // render a CI-health glyph column (My-PRs tab), driven by Event.CIState
 	Now        time.Time     // reference time for relative timestamps
-	StaleAfter time.Duration // DUE threshold; zero falls back to defaultStaleAfter
+	StaleAfter time.Duration // how long an item stays marked NEW; zero falls back to defaultStaleAfter
 }
 
 // Render sorts events oldest-first (newest at the bottom, log-style) and
@@ -73,7 +74,7 @@ func renderRow(e Event, o RenderOpts) string {
 		lead = colorize(padLeft(fmt.Sprintf("%d", e.Seq), 4), colDim, o.Color) + " "
 	}
 
-	// GUTTER: your state — DUE (needs you, aging), NEW (unread), blank (read).
+	// GUTTER: NEW while a fresh unread item is within its window, else blank.
 	label, gcolor := gutterMark(e, o.Now, o.staleAfter())
 	gutter := colorize(padRight(label, 3), gcolor, o.Color)
 
@@ -144,7 +145,7 @@ func tagCell(e Event, o RenderOpts) string {
 	return strings.Join(tags, " ")
 }
 
-// staleAfter resolves the DUE threshold, defaulting when the caller left it unset.
+// staleAfter resolves the NEW window, defaulting when the caller left it unset.
 func (o RenderOpts) staleAfter() time.Duration {
 	if o.StaleAfter > 0 {
 		return o.StaleAfter
@@ -152,13 +153,12 @@ func (o RenderOpts) staleAfter() time.Duration {
 	return defaultStaleAfter
 }
 
-// gutterMark returns the gutter tag and its color for an event's state:
-// "DUE" (unread, actionable, aging past staleAfter), "NEW" (unread), "" (read).
-func gutterMark(e Event, now time.Time, staleAfter time.Duration) (string, color) {
-	if e.Unread && e.Actionable && now.Sub(e.TS) > staleAfter {
-		return "DUE", colYellow
-	}
-	if e.Unread {
+// gutterMark returns the gutter tag and its color: "NEW" (blue) while an unread
+// item is still within its window, then blank once it ages past the window or is
+// read. A fresh arrival announces itself and then settles quietly into the list —
+// there is no separate marker for an aging item.
+func gutterMark(e Event, now time.Time, newWindow time.Duration) (string, color) {
+	if e.Unread && now.Sub(e.TS) <= newWindow {
 		return "NEW", colBlue
 	}
 	return "", ""
