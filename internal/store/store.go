@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS open_prs (
   is_draft    INTEGER,
   ci_state    TEXT,
   merge_state TEXT,
+  labels      TEXT,
   updated_at  INTEGER,
   last_seen   INTEGER
 );
@@ -93,6 +94,14 @@ func Open(path string) (*Store, error) {
 	// Serialize this process's own access; cross-process is handled by WAL.
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, err
+	}
+	// Additive column for installs whose open_prs predates the labels feature;
+	// CREATE IF NOT EXISTS never alters an existing table, so add it separately and
+	// ignore the "duplicate column" error once it's already there.
+	if _, err := db.Exec(`ALTER TABLE open_prs ADD COLUMN labels TEXT`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
 		db.Close()
 		return nil, err
 	}

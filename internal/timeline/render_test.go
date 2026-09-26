@@ -99,6 +99,25 @@ func TestRelativeOrDate(t *testing.T) {
 	}
 }
 
+func TestRenderRowTags(t *testing.T) {
+	now := time.Now()
+	e := Event{Kind: KindOpenPR, Repo: "acme/api", Number: 7, TS: now, IsMine: true,
+		IsDraft: true, Labels: []string{"bug", "wip"}}
+
+	got := renderRow(e, RenderOpts{LeadWithPR: true, Now: now})
+	for _, want := range []string{"[draft]", "[bug]", "[wip]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("row missing tag %q: %q", want, got)
+		}
+	}
+
+	// No draft, no labels -> no trailing tag decoration at all.
+	plain := renderRow(Event{Kind: KindOpenPR, Repo: "acme/api", Number: 8, TS: now}, RenderOpts{LeadWithPR: true, Now: now})
+	if strings.Contains(plain, "[") {
+		t.Errorf("untagged row should carry no [chip]: %q", plain)
+	}
+}
+
 func TestGutterMark(t *testing.T) {
 	now := time.Now()
 	old := Event{Unread: true, Actionable: true, TS: now.Add(-48 * time.Hour)}

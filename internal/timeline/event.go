@@ -37,9 +37,11 @@ type Event struct {
 	Detail     string // actor + action, or CI summary
 	URL        string // web URL for the PR (OSC 8 target)
 	Unread     bool
-	Actionable bool   // drives the stale "!" gutter and retention protection
-	IsMine     bool   // author == viewer -> AUTHOR renders as dim em-dash
-	CIState    string // current CI rollup for My-PRs roster rows (drives the CI glyph); "" elsewhere
+	Actionable bool     // drives the stale "!" gutter and retention protection
+	IsMine     bool     // author == viewer -> AUTHOR renders as dim em-dash
+	CIState    string   // current CI rollup for My-PRs roster rows (drives the CI glyph); "" elsewhere
+	IsDraft    bool     // PR is a draft -> renders a [draft] status chip in the trailing tags
+	Labels     []string // GitHub PR labels, rendered as [name] tags at the end of the row
 }
 
 // Badge describes the colored badge cell for a Kind.

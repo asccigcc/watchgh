@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -17,8 +18,13 @@ type OpenPR struct {
 	IsDraft    bool
 	CIState    string
 	MergeState string
+	Labels     []string
 	UpdatedAt  time.Time
 }
+
+// labelSep joins/splits a PR's labels in the single TEXT column. A newline can't
+// appear in a GitHub label name, so it round-trips the list without escaping.
+const labelSep = "\n"
 
 // SetOpenPR upserts one PR into the roster, stamping last_seen so a later
 // ReconcileOpenPRs can drop rows for PRs that have since closed.
@@ -26,15 +32,15 @@ func (s *Store) SetOpenPR(ctx context.Context, pr OpenPR) error {
 	now := time.Now().Unix()
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO open_prs
-  (pr_key, repo, number, title, url, author, is_draft, ci_state, merge_state, updated_at, last_seen)
-VALUES (?,?,?,?,?,?,?,?,?,?,?)
+  (pr_key, repo, number, title, url, author, is_draft, ci_state, merge_state, labels, updated_at, last_seen)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(pr_key) DO UPDATE SET
   title=excluded.title, url=excluded.url, author=excluded.author,
   is_draft=excluded.is_draft, ci_state=excluded.ci_state,
-  merge_state=excluded.merge_state, updated_at=excluded.updated_at,
-  last_seen=excluded.last_seen`,
+  merge_state=excluded.merge_state, labels=excluded.labels,
+  updated_at=excluded.updated_at, last_seen=excluded.last_seen`,
 		pr.Key, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Author, boolToInt(pr.IsDraft),
-		pr.CIState, pr.MergeState, pr.UpdatedAt.Unix(), now)
+		pr.CIState, pr.MergeState, strings.Join(pr.Labels, labelSep), pr.UpdatedAt.Unix(), now)
 	return err
 }
 
@@ -54,7 +60,7 @@ func (s *Store) ReconcileOpenPRs(ctx context.Context, activeKeys map[string]bool
 // OpenPRs returns the current roster, most recently updated first.
 func (s *Store) OpenPRs(ctx context.Context) ([]OpenPR, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT pr_key, repo, number, title, url, author, is_draft, ci_state, merge_state, updated_at
+SELECT pr_key, repo, number, title, url, author, is_draft, ci_state, merge_state, labels, updated_at
 FROM open_prs ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -65,12 +71,16 @@ FROM open_prs ORDER BY updated_at DESC`)
 	for rows.Next() {
 		var pr OpenPR
 		var draft int
+		var labels string
 		var updated int64
 		if err := rows.Scan(&pr.Key, &pr.Repo, &pr.Number, &pr.Title, &pr.URL,
-			&pr.Author, &draft, &pr.CIState, &pr.MergeState, &updated); err != nil {
+			&pr.Author, &draft, &pr.CIState, &pr.MergeState, &labels, &updated); err != nil {
 			return nil, err
 		}
 		pr.IsDraft = draft == 1
+		if labels != "" {
+			pr.Labels = strings.Split(labels, labelSep)
+		}
 		pr.UpdatedAt = time.Unix(updated, 0)
 		out = append(out, pr)
 	}

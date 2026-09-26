@@ -318,7 +318,7 @@ func toOpenPR(pr github.TrackedPR, key string) store.OpenPR {
 	return store.OpenPR{
 		Key: key, Repo: pr.Repo, Number: pr.Number, Title: pr.Title, URL: pr.URL,
 		Author: pr.Author, IsDraft: pr.IsDraft, CIState: pr.CIState,
-		MergeState: pr.MergeState, UpdatedAt: pr.UpdatedAt,
+		MergeState: pr.MergeState, Labels: pr.Labels, UpdatedAt: pr.UpdatedAt,
 	}
 }
 

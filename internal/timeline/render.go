@@ -116,11 +116,32 @@ func renderRow(e Event, o RenderOpts) string {
 	row := fmt.Sprintf("%s%s %s  %s%s  %s  %s  %s",
 		lead, gutter, age, ci, badgeCell, ref, author, e.Detail)
 
+	// TAGS: trailing status chip + GitHub labels, so the row's kind still reads
+	// left-to-right and the tags sit out of the way at the end.
+	if tags := tagCell(e, o); tags != "" {
+		row += "  " + tags
+	}
+
 	// Read/history rows dim as a freshness cue.
 	if !e.Unread && o.Color {
 		row = string(colDim) + row + string(colReset)
 	}
 	return row
+}
+
+// tagCell renders the trailing tags: a local [draft] status chip (yellow, since
+// draft isn't carried by the badge or CI glyph) followed by the PR's GitHub
+// labels as dim [name] chips. Labels come from the tracked-PR fetch, so they're
+// present on roster PRs and simply absent on rows we never fetched them for.
+func tagCell(e Event, o RenderOpts) string {
+	var tags []string
+	if e.IsDraft {
+		tags = append(tags, colorize("[draft]", colYellow, o.Color))
+	}
+	for _, l := range e.Labels {
+		tags = append(tags, colorize("["+l+"]", colDim, o.Color))
+	}
+	return strings.Join(tags, " ")
 }
 
 // staleAfter resolves the DUE threshold, defaulting when the caller left it unset.

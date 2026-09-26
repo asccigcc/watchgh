@@ -278,6 +278,36 @@ func TestOpenPRRosterUpsertsAndReconciles(t *testing.T) {
 	}
 }
 
+func TestOpenPRRosterRoundTripsLabels(t *testing.T) {
+	s := testStore(t)
+	pr := OpenPR{Key: "acme/api#1", Repo: "acme/api", Number: 1, Title: "one",
+		IsDraft: true, Labels: []string{"bug", "needs review"}, UpdatedAt: time.Now()}
+	if err := s.SetOpenPR(bg, pr); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.OpenPRs(bg)
+	if len(got) != 1 {
+		t.Fatalf("want 1 roster row, got %d", len(got))
+	}
+	if !got[0].IsDraft {
+		t.Errorf("draft flag lost in round-trip: %+v", got[0])
+	}
+	if len(got[0].Labels) != 2 || got[0].Labels[0] != "bug" || got[0].Labels[1] != "needs review" {
+		t.Errorf("labels lost in round-trip: %+v", got[0].Labels)
+	}
+
+	// A PR with no labels comes back with an empty (not one-element "") slice.
+	if err := s.SetOpenPR(bg, OpenPR{Key: "acme/api#2", Repo: "acme/api", Number: 2, UpdatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.OpenPRs(bg)
+	for _, p := range got {
+		if p.Key == "acme/api#2" && len(p.Labels) != 0 {
+			t.Errorf("labelless PR should have no labels, got %+v", p.Labels)
+		}
+	}
+}
+
 func TestBackfillDetailsRewritesOnlyMatchingTokens(t *testing.T) {
 	s := testStore(t)
 	raw := ev("raw", "t1", true)

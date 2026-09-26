@@ -514,7 +514,9 @@ func (m *model) roster() []timeline.Event {
 	out := make([]timeline.Event, 0, len(prs))
 	for _, pr := range prs {
 		if e, ok := latest[pr.Key]; ok {
-			e.CIState = pr.CIState // carry current CI onto the activity row so the glyph reflects now, not the event
+			// Carry the roster's live PR facts onto the activity row: current CI (so the
+			// glyph reflects now, not the event) and the labels/draft flag that drive the tags.
+			e.CIState, e.IsDraft, e.Labels = pr.CIState, pr.IsDraft, pr.Labels
 			out = append(out, e)
 		} else {
 			out = append(out, synthPR(pr))
@@ -570,7 +572,7 @@ func synthPR(pr store.OpenPR) timeline.Event {
 	e := timeline.Event{
 		Source: "graphql", Repo: pr.Repo, Number: pr.Number, URL: pr.URL,
 		TS: pr.UpdatedAt, IsMine: true, Detail: pr.Title, Kind: timeline.KindOpenPR,
-		CIState: pr.CIState,
+		CIState: pr.CIState, IsDraft: pr.IsDraft, Labels: pr.Labels,
 	}
 	switch {
 	case pr.MergeState == "BLOCKED" || pr.MergeState == "DIRTY":

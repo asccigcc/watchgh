@@ -23,6 +23,7 @@ type TrackedPR struct {
 	HeadSHA    string
 	CIState    string // SUCCESS, FAILURE, ERROR, PENDING, EXPECTED, or "" (no checks)
 	CheckCount int
+	Labels     []string  // GitHub label names, in the PR's label order
 	UpdatedAt  time.Time // last PR update, for the Mine-roster row's age
 }
 
@@ -39,6 +40,7 @@ fragment pr on PullRequest {
   number url title isDraft updatedAt
   author { login }
   repository { nameWithOwner }
+  labels(first: 5) { nodes { name } }
   mergeStateStatus
   commits(last: 1) {
     nodes { commit { oid statusCheckRollup { state contexts { totalCount } } } }
@@ -89,6 +91,11 @@ type prNode struct {
 	Repository struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
+	Labels struct {
+		Nodes []struct {
+			Name string `json:"name"`
+		} `json:"nodes"`
+	} `json:"labels"`
 	MergeStateStatus string `json:"mergeStateStatus"`
 	Commits          struct {
 		Nodes []struct {
@@ -114,6 +121,9 @@ func (n prNode) toTrackedPR() TrackedPR {
 		Author:     n.Author.Login,
 		Repo:       n.Repository.NameWithOwner,
 		MergeState: n.MergeStateStatus,
+	}
+	for _, l := range n.Labels.Nodes {
+		pr.Labels = append(pr.Labels, l.Name)
 	}
 	if t, err := time.Parse(time.RFC3339, n.UpdatedAt); err == nil {
 		pr.UpdatedAt = t
