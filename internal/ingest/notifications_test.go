@@ -68,6 +68,25 @@ func TestFromNotificationMinePII(t *testing.T) {
 	}
 }
 
+func TestFromNotificationReviewRequestShowsTitle(t *testing.T) {
+	var n github.Notification
+	n.ID = "1"
+	n.Reason = "review_requested"
+	n.UpdatedAt = time.Now()
+	n.Subject.Title = "Fix the widget cache"
+
+	// A review request swaps the redundant "review requested" detail for the title.
+	if got := FromNotification(n, github.Subject{}, "me").Detail; got != "Fix the widget cache" {
+		t.Errorf("detail = %q, want the PR title", got)
+	}
+
+	// With no title, it falls back to the action phrase rather than going blank.
+	n.Subject.Title = ""
+	if got := FromNotification(n, github.Subject{}, "me").Detail; got != "review requested" {
+		t.Errorf("titleless detail = %q, want the phrase fallback", got)
+	}
+}
+
 func TestFromNotificationIDIsStableThreadID(t *testing.T) {
 	// The event id must be the bare thread id (not thread + "@" + updated_at), so
 	// each thread owns exactly one row and later polls upsert onto it rather than

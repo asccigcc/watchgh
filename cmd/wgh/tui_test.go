@@ -154,16 +154,19 @@ func TestPadANSI(t *testing.T) {
 func TestTabFilters(t *testing.T) {
 	// Inbox/Read/CI are lenses over stored events; "My PRs" is roster-sourced,
 	// so its filter never matches and mine events fold into their PR's roster row.
-	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3).
+	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3). The Inbox is unread AND
+	// actionable; everything else non-mine/non-CI (handled, or unread-but-passive)
+	// falls through to Read.
 	cases := []struct {
 		e    timeline.Event
 		want int // matching tab index, or -1 if none (roster-only)
 	}{
-		{timeline.Event{Unread: true, IsMine: false, Source: "notification"}, 0},  // Inbox
-		{timeline.Event{Unread: false, IsMine: false, Source: "notification"}, 2}, // Read
-		{timeline.Event{Unread: true, IsMine: true, Source: "graphql"}, 3},        // CI
-		{timeline.Event{Unread: false, IsMine: true, Source: "graphql"}, 3},       // CI (read)
-		{timeline.Event{Unread: true, IsMine: true, Source: "notification"}, -1},  // My PRs → roster
+		{timeline.Event{Unread: true, Actionable: true, IsMine: false, Source: "notification"}, 0},  // Inbox: needs you, open
+		{timeline.Event{Unread: true, Actionable: false, IsMine: false, Source: "notification"}, 2}, // Read: unread but passive (comment/CI noise)
+		{timeline.Event{Unread: false, Actionable: true, IsMine: false, Source: "notification"}, 2}, // Read: handled
+		{timeline.Event{Unread: true, IsMine: true, Source: "graphql"}, 3},                          // CI
+		{timeline.Event{Unread: false, IsMine: true, Source: "graphql"}, 3},                         // CI (read)
+		{timeline.Event{Unread: true, IsMine: true, Source: "notification"}, -1},                    // My PRs → roster
 	}
 	for i, c := range cases {
 		hits, matched := 0, -1
@@ -189,10 +192,11 @@ func TestRecountMatchesFiltersAndRoster(t *testing.T) {
 	m := &model{
 		counts: make([]int, len(tabDefs)),
 		all: []timeline.Event{
-			{Unread: true, IsMine: false, Source: "notification"},  // Inbox
-			{Unread: true, IsMine: false, Source: "notification"},  // Inbox
-			{Unread: false, IsMine: false, Source: "notification"}, // Read
-			{Unread: true, IsMine: true, Source: "graphql"},        // CI
+			{Unread: true, Actionable: true, IsMine: false, Source: "notification"},  // Inbox
+			{Unread: true, Actionable: true, IsMine: false, Source: "notification"},  // Inbox
+			{Unread: true, Actionable: false, IsMine: false, Source: "notification"}, // Read (unread but passive)
+			{Unread: false, IsMine: false, Source: "notification"},                   // Read (handled)
+			{Unread: true, IsMine: true, Source: "graphql"},                          // CI
 		},
 		prs: []timeline.Event{{}, {}, {}}, // three roster rows
 		ci:  []timeline.Event{{}},         // one collapsed CI row (latest-per-PR)
@@ -200,8 +204,9 @@ func TestRecountMatchesFiltersAndRoster(t *testing.T) {
 	m.recount()
 
 	// Order: Inbox(0) · My PRs(1) · Read(2) · CI(3). Mine and CI count their
-	// collapsed rosters, not the raw event matches.
-	want := []int{2, 3, 1, 1}
+	// collapsed rosters, not the raw event matches. The passive unread item counts
+	// toward Read, not Inbox.
+	want := []int{2, 3, 2, 1}
 	for i, w := range want {
 		if m.counts[i] != w {
 			t.Errorf("counts[%d] = %d, want %d", i, m.counts[i], w)

@@ -127,17 +127,24 @@ const ciTab = 3
 // tabDefs are the timeline lenses, switched with 1-4 / Tab, ordered by priority:
 // what others need from you, your own PRs, then history and CI detail.
 // Inbox/Read/CI are filters over stored events: CI holds every CI/merge event,
-// then the non-mine human activity splits into unread (Inbox) and handled
-// (Read). "My PRs" is special — its rows come from the open-PR roster (see
-// tabRows), so its filter never matches and mine notification events fold into
-// their PR's roster row instead.
+// then the non-mine human activity splits into the Inbox and the Read tab.
+// "My PRs" is special — its rows come from the open-PR roster (see tabRows), so
+// its filter never matches and mine notification events fold into their PR's
+// roster row instead.
+//
+// The Inbox is scoped to things aimed at you and still open: unread AND
+// actionable (review requests, assignments, @-mentions). Everything else that
+// isn't yours or CI — handled items, and passive noise like plain comments or CI
+// chatter — falls through to Read rather than cluttering the Inbox, but is still
+// stored and reachable there. The two are exact complements, so every non-mine,
+// non-CI event lands in exactly one of them.
 var tabDefs = []struct {
 	name string
 	show func(timeline.Event) bool
 }{
-	{"Inbox", func(e timeline.Event) bool { return e.Unread && !e.IsMine && !isCI(e) }},
+	{"Inbox", func(e timeline.Event) bool { return e.Unread && e.Actionable && !e.IsMine && !isCI(e) }},
 	{"My PRs", func(timeline.Event) bool { return false }},
-	{"Read", func(e timeline.Event) bool { return !e.Unread && !e.IsMine && !isCI(e) }},
+	{"Read", func(e timeline.Event) bool { return (!e.Unread || !e.Actionable) && !e.IsMine && !isCI(e) }},
 	{"CI", func(e timeline.Event) bool { return isCI(e) }},
 }
 

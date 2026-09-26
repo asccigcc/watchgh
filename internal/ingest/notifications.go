@@ -27,6 +27,13 @@ func Backfill(ctx context.Context, st *store.Store) error {
 func FromNotification(n github.Notification, s github.Subject, viewer string) timeline.Event {
 	kind, detail, actionable := classify(n.Reason)
 
+	// The "review" badge already says it's a review request, so a "review requested"
+	// detail just echoes it. Show the PR title there instead, so the row tells you
+	// which PR is waiting on you; other kinds keep their action phrase.
+	if kind == timeline.KindReviewRequested && n.Subject.Title != "" {
+		detail = n.Subject.Title
+	}
+
 	isMine := s.User.Login != "" && s.User.Login == viewer
 	author := s.User.Login
 	if isMine {
