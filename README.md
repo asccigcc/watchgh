@@ -28,7 +28,7 @@ It installs to `/usr/local/bin/wgh`. Set `BINDIR` to change that, or `WGH_TAG`
 to pin a specific release:
 
 ```sh
-BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
+BINDIR=/opt/homebrew/bin WGH_TAG=v0.7.0 bash install.sh
 ```
 
 Then run it:
@@ -43,23 +43,20 @@ its token.
 
 ## Update
 
-`wgh` is a single binary, so updating just means re-running the installer. It
-always fetches the latest release:
+The updater upgrades your install in place to the latest release and restarts
+the background poller for you, so the running copy picks up the new binary right
+away:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/update.sh | bash
 ```
 
-Then **restart the background poller** so it runs the new binary:
+It's a no-op when you're already current. Pin a tag or force a reinstall with
+`WGH_TAG=v0.7.0` or `WGH_FORCE=1`. Check what you're running with `wgh version`.
 
-```sh
-wgh stop   # stop the running poller
-wgh        # reinstall and start it on the updated binary
-```
-
-This step matters. The poller runs continuously, so replacing the file on disk
-doesn't change the copy already running in memory. The old one keeps going until
-you restart it. `wgh stop && wgh` swaps in the updated binary in one step.
+Why the poller restart matters: it runs continuously, so replacing the file on
+disk doesn't change the copy already in memory — the updater's `launchctl`
+kickstart re-execs it onto the new binary. (Doing it by hand is `wgh stop && wgh`.)
 
 ## Commands
 
@@ -68,6 +65,7 @@ wgh          # interactive timeline (prints plain text when piped)
 wgh open 42  # open item 42 in the browser, mark it read (here and on GitHub)
 wgh read 42  # mark item 42 read without opening
 wgh stop     # stop the background poller (restarts next time you open wgh)
+wgh version  # print the installed version
 ```
 
 ## Interactive timeline

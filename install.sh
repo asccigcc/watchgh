@@ -7,11 +7,11 @@
 #   curl -fsSL https://raw.githubusercontent.com/asccigcc/watchgh/main/install.sh | bash
 #
 # Override the install location or release tag with env vars:
-#   BINDIR=/opt/homebrew/bin WGH_TAG=v0.1.0 bash install.sh
+#   BINDIR=/opt/homebrew/bin WGH_TAG=v0.7.0 bash install.sh
 #
-# While the repo is private the anonymous URLs above return 404; run this from a
-# checkout (bash install.sh) with the GitHub CLI authenticated, and it fetches
-# the asset via gh instead.
+# The curl one-liner works anonymously against the public releases. If the GitHub
+# CLI (gh) is installed it's used instead, which also works behind auth and rate
+# limits. To upgrade an existing install later, use update.sh.
 set -euo pipefail
 
 REPO="${WGH_REPO:-asccigcc/watchgh}"

@@ -29,6 +29,12 @@ import (
 // has a default, so a missing config file is fine.
 var cfg = config.Defaults()
 
+// version is the release version, set at build time via -ldflags
+// "-X main.version=…" (see the Makefile's VERSION). A plain `go build` leaves it
+// "dev", so a source build is never mistaken for a tagged release — and update.sh
+// reads `wgh version` to decide whether a newer release is available.
+var version = "dev"
+
 func main() {
 	args := os.Args[1:]
 	cmd := ""
@@ -68,6 +74,8 @@ func main() {
 	case "__poll":
 		// Hidden: the headless loop launchd runs as the background poller.
 		err = runPoll(ctx)
+	case "version", "-v", "--version":
+		fmt.Println(version)
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -89,6 +97,7 @@ Usage:
   wgh open <n>      Open item <n> in the browser and mark it read (here + GitHub)
   wgh read <n>      Mark item <n> read without opening
   wgh stop          Stop the background poller (it restarts next time you open wgh)
+  wgh version       Print the installed version
   wgh help          Show this help
 
 Opening wgh installs a launchd background poller that keeps GitHub in sync and
